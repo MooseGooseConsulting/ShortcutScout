@@ -36,7 +36,9 @@ device name (`con`, `nul`, `com1`…). If two files define the same id, the firs
 and the other is reported as ignored. An edit is applied to the files as they are on disk at
 that moment, so hand edits made while an MCP server is running are kept. While `shortcuts.json`
 is unreadable, an edit that would create a new `apps/<id>.json` is refused, because the id
-might already be defined in the file that cannot be read.
+might already be defined in the file that cannot be read. Likewise an `apps/<id>.json` that
+exists but did not load (a hand edit in progress, or another id inside it) is never
+overwritten by an add.
 
 ## Overlay settings (`config/shortcuts.json` → `overlay`)
 

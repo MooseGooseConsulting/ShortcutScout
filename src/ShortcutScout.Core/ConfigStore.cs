@@ -229,12 +229,21 @@ public sealed class ConfigStore
             // does, a new apps/<id>.json would be ignored the moment the main file is repaired
             // — the same vanishing edit, one step later. An app already loaded from apps/ is
             // known to live there, so it can still be saved.
-            if (_mainUnreadable && !Config.Apps.Any(a => a.Id == app.Id))
+            var loaded = Config.Apps.Any(a => a.Id == app.Id);
+            if (_mainUnreadable && !loaded)
                 throw new IOException(
                     $"shortcuts.json could not be read, so '{app.Id}' may already be defined there; fix that file first");
 
+            // The same blindness one level down: the file is there, but this app did not come
+            // out of it — it failed to parse (a hand edit in progress), or it defines another
+            // id. Saving would replace everything in it with the one row being added.
+            var path = Path.Combine(AppsDir, app.Id + ".json");
+            if (!loaded && File.Exists(path))
+                throw new IOException(
+                    $"apps/{app.Id}.json exists but '{app.Id}' was not loaded from it; fix that file first");
+
             Directory.CreateDirectory(AppsDir);
-            WriteAtomic(Path.Combine(AppsDir, app.Id + ".json"), JsonSerializer.Serialize(app, Json));
+            WriteAtomic(path, JsonSerializer.Serialize(app, Json));
             Written?.Invoke($"apps/{app.Id}.json ({app.Shortcuts.Count} shortcuts)");
         }
 
