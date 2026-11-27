@@ -36,10 +36,12 @@ public partial class MainWindow : Window
     private bool _sampling;
     private long _lastTickAt;
 
-    /// <summary>When the current peek ends.</summary>
-    // "No peek scheduled". Zero is a past instant, so `peekRemaining` comes out negative
-    // without any special-casing. Do not use TimeSpan.MinValue here: subtracting the
-    // elapsed clock from it overflows on the very first tick and kills the app at startup.
+    /// <summary>
+    /// When the current peek ends. <see cref="TimeSpan.Zero"/> means nothing is scheduled:
+    /// that instant is already in the past, so `Refresh` reports no remaining peek time.
+    /// Do not restore <see cref="TimeSpan.MinValue"/> — subtracting the elapsed clock from it
+    /// overflows on the first tick and kills the app at startup.
+    /// </summary>
     private TimeSpan _peekUntil = TimeSpan.Zero;
 
     // Long enough ago that the first peek is never rate-limited (MinValue would overflow
@@ -105,7 +107,7 @@ public partial class MainWindow : Window
     {
         ApplyLayout();
         _lastSignature = ""; // rebuild rows at the new size / count
-        UpdateContent(Settings);
+        RenderRows(ObserveTriggers(Settings), Settings);
 
         // Growing while docked against the right or bottom edge would push the text off
         // screen, and the normal dodge only re-docks when the cursor is close. Re-place
@@ -137,34 +139,29 @@ public partial class MainWindow : Window
 
         var settings = Settings;
 
+        // Triggers first: StartPeek inside here sets `_peekUntil` and advances the rotation
+        // slot. Computing opacity before it meant a peek that began on this tick was applied
+        // one tick late, and a re-peek landing on the tick the old one expired hid the panel
+        // for 500ms — a visible flash.
+        var app = ObserveTriggers(settings);
+
         var idle = ForceIdle ? int.MaxValue : CurrentIdleSeconds();
-        // Compare instead of subtracting straight away: with a TimeSpan.MinValue sentinel the
-        // subtraction overflows (and threw at startup). Both operands are non-negative here.
         var peekRemaining = _peekUntil <= _clock.Elapsed ? 0 : (_peekUntil - _clock.Elapsed).TotalSeconds;
 
-        var target = IdlePolicy.OpacityFor(settings, _toggle.Hidden, idle, peekRemaining);
-        if (_obstructed && !_toggle.Hidden) target = Math.Min(target, 0.14);
+        // Opacity and rotation are decided together, in Core, so the ordering rules are
+        // covered by tests: `peekRemaining` above is already post-trigger, and the rotation
+        // this returns is used by the rows below.
+        var tickState = OverlayTicker.Decide(
+            settings, _toggle.Hidden, idle, peekRemaining,
+            _currentOpacity, _rotationSlot, _peekCountedRotation, _obstructed);
 
-        // Rotation counts *appearances*. A peek advances the slot when it starts (which is
-        // the only event ambient mode ever gets, since the panel never becomes invisible),
-        // and an appearance not caused by a peek — an idle reveal, or an un-hide whose peek
-        // was refused by the anti-strobe floor — advances it here. The flag keeps one
-        // appearance from being counted twice.
-        //
-        // This runs *before* UpdateContent: building the rows first meant the opening frame
-        // of an idle reveal showed the previous slice and then swapped under the fade.
-        if (target > 0.001 && _currentOpacity <= 0.001)
-        {
-            if (!_peekCountedRotation) _rotationSlot++;
-            _peekCountedRotation = false;
-        }
-        else if (target <= 0.001)
-        {
-            _peekCountedRotation = false;
-        }
+        _rotationSlot = tickState.RotationSlot;
+        _peekCountedRotation = tickState.PeekCountedRotation;
 
-        UpdateContent(settings);
-        ApplyOpacity(target, settings);
+        // Rows after the rotation decision, so the first frame of an appearance already shows
+        // the slice that decision selected.
+        RenderRows(app, settings);
+        ApplyOpacity(tickState.Target, settings);
 
         if (_toggle.Hidden) return;
 
@@ -173,7 +170,7 @@ public partial class MainWindow : Window
         // cursor and didn't move at all.
         RunAwayFromCursor();
 
-        if (target <= 0.001) BeginBackdropSample();
+        if (tickState.Target <= 0.001) BeginBackdropSample();
     }
 
     /// <summary>
@@ -265,7 +262,11 @@ public partial class MainWindow : Window
         Halo.BlurRadius = theme.HaloBlur;
     }
 
-    private void UpdateContent(OverlaySettings settings)
+    /// <summary>
+    /// Watch the foreground window/app, and start a peek if this tick calls for one.
+    /// Returns the matched app so the rows can be built from the same observation.
+    /// </summary>
+    private AppConfig? ObserveTriggers(OverlaySettings settings)
     {
         var hwnd = Win32.GetForegroundWindow();
         var fg = ForegroundReader.Read();
@@ -306,6 +307,12 @@ public partial class MainWindow : Window
             _lastAppId = appId;
         }
 
+        return app;
+    }
+
+    private void RenderRows(AppConfig? app, OverlaySettings settings)
+    {
+        var appId = app?.Id ?? "";
         var rows = new List<ShortcutRow>();
         if (app != null)
         {
