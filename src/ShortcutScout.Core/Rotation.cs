@@ -31,16 +31,18 @@ public sealed class Rotation
         // recomputing gave a different "unseen first" order on the second call and the rows
         // reshuffled half a second into an appearance. One request, one answer: the same
         // list, row count and slot return the selection already made.
-        var signature = string.Join("\n", all.Select(s => Key(s) + (s.Discovery ? "|d" : "")));
-        if (_last is { } last && last.Slot == slot && last.MaxItems == maxItems && last.Signature == signature)
+        //
+        // "The same list" is compared row by row. Shortcut is a record, so that is every field;
+        // a joined-string key missed Category and could not tell "a|b" + "c" from "a" + "b|c".
+        if (_last is { } last && last.Slot == slot && last.MaxItems == maxItems && last.Input.SequenceEqual(all))
             return new List<Shortcut>(last.Rows);
 
         var selected = Compute(all, maxItems, slot);
-        _last = (signature, maxItems, slot, selected);
+        _last = (all.ToArray(), maxItems, slot, selected);
         return new List<Shortcut>(selected);
     }
 
-    private (string Signature, int MaxItems, long Slot, List<Shortcut> Rows)? _last;
+    private (Shortcut[] Input, int MaxItems, long Slot, List<Shortcut> Rows)? _last;
 
     private List<Shortcut> Compute(IReadOnlyList<Shortcut> all, int maxItems, long slot)
     {

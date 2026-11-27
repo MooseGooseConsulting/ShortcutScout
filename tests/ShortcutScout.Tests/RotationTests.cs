@@ -75,4 +75,20 @@ public class RotationTests
         Assert.AreNotEqual(Keys(rotation.Select(chrome, 20, slot: 4)), Keys(rotation.Select(edited, 20, slot: 4)),
             "a reloaded config with a new shortcut");
     }
+
+    [TestMethod]
+    public void ListsThatOnlyLookAlikeWhenJoined_AreNotAnsweredFromTheLastSelection()
+    {
+        var rotation = new Rotation();
+
+        // Both flatten to "a|b|c" under a keys|action key.
+        rotation.Select(new List<Shortcut> { new("a|b", "c") }, 8, slot: 2);
+        var moved = rotation.Select(new List<Shortcut> { new("a", "b|c") }, 8, slot: 2).Single();
+        Assert.AreEqual("a", moved.Keys);
+
+        // Category is part of a row too, though nothing draws it yet.
+        rotation.Select(new List<Shortcut> { new("Ctrl+K", "Palette", Category: "General") }, 8, slot: 2);
+        var recategorised = rotation.Select(new List<Shortcut> { new("Ctrl+K", "Palette", Category: "Search") }, 8, slot: 2).Single();
+        Assert.AreEqual("Search", recategorised.Category);
+    }
 }
