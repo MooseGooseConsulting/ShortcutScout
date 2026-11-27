@@ -7,7 +7,7 @@ namespace ShortcutScout.Core;
 public sealed class ConfigStore
 {
     // Relaxed escaping: these files are meant to be read and edited by hand, and the default
-    // encoder writes "Ctrl+T" as "Ctrl+T".
+    // encoder writes the plus in "Ctrl+T" as a six-character unicode escape (U+002B).
     private static readonly JsonSerializerOptions Json = new()
     {
         WriteIndented = true,
@@ -16,6 +16,21 @@ public sealed class ConfigStore
 
     /// <summary>Ids of the apps defined inside shortcuts.json rather than in apps/*.json.</summary>
     private HashSet<string> _inlineAppIds = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The last <see cref="Reload"/> could not read shortcuts.json, so which ids it defines
+    /// is unknown — different from the file simply not existing.
+    /// </summary>
+    private bool _mainUnreadable;
+
+    // Windows device names. "con.json" opens the console device on Windows 10 and earlier,
+    // whatever the extension, so these can never be an apps/<id>.json file.
+    private static readonly HashSet<string> ReservedFileNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "CON", "PRN", "AUX", "NUL",
+        "COM0", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+        "LPT0", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    };
 
     public string ConfigDir { get; }
     public GlobalConfig Config { get; private set; } = new();
@@ -50,6 +65,7 @@ public sealed class ConfigStore
     {
         var errors = new List<string>();
         var cfg = new GlobalConfig();
+        var mainUnreadable = false;
 
         try
         {
@@ -58,6 +74,7 @@ public sealed class ConfigStore
         }
         catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
+            mainUnreadable = true;
             errors.Add($"shortcuts.json: {ex.Message}");
             cfg = new GlobalConfig
             {
@@ -75,7 +92,7 @@ public sealed class ConfigStore
 
         if (Directory.Exists(AppsDir))
         {
-            foreach (var f in Directory.EnumerateFiles(AppsDir, "*.json").OrderBy(x => x, StringComparer.OrdinalIgnoreCase))
+            foreach (var f in ListAppFiles(errors))
             {
                 try
                 {
@@ -99,8 +116,26 @@ public sealed class ConfigStore
         }
 
         _inlineAppIds = inline;
+        _mainUnreadable = mainUnreadable;
         Config = cfg;
         LoadErrors = errors;
+    }
+
+    /// <summary>
+    /// Listing the folder can fail on its own (access denied, or removed since the check).
+    /// That is one more thing to report, not a reason to break "Reload never throws".
+    /// </summary>
+    private List<string> ListAppFiles(List<string> errors)
+    {
+        try
+        {
+            return Directory.EnumerateFiles(AppsDir, "*.json").OrderBy(x => x, StringComparer.OrdinalIgnoreCase).ToList();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            errors.Add($"apps/: {ex.Message}");
+            return new List<string>();
+        }
     }
 
     /// <summary>
@@ -128,7 +163,7 @@ public sealed class ConfigStore
     /// <summary>
     /// An app id doubles as a file name (<c>apps/&lt;id&gt;.json</c>) and arrives from agents over
     /// MCP, so it has to be a plain name: no separators, no drive, no trailing dot or space
-    /// (which Windows silently strips, aliasing another file).
+    /// (which Windows silently strips, aliasing another file), and not a device name.
     /// </summary>
     public static bool IsValidAppId(string? id)
     {
@@ -136,6 +171,8 @@ public sealed class ConfigStore
         if (id != id.Trim() || id.EndsWith('.') || id.StartsWith('.')) return false;
         foreach (var c in id)
             if (char.IsControl(c) || "/\\:*?\"<>|".Contains(c)) return false;
+        // Windows decides "is this a device" from the part before the first dot.
+        if (ReservedFileNames.Contains(id.Split('.')[0].TrimEnd())) return false;
         return true;
     }
 
@@ -187,6 +224,14 @@ public sealed class ConfigStore
         }
         else
         {
+            // While shortcuts.json is unreadable nobody knows whether it defines this id. If it
+            // does, a new apps/<id>.json would be ignored the moment the main file is repaired
+            // — the same vanishing edit, one step later. An app already loaded from apps/ is
+            // known to live there, so it can still be saved.
+            if (_mainUnreadable && !Config.Apps.Any(a => a.Id == app.Id))
+                throw new IOException(
+                    $"shortcuts.json could not be read, so '{app.Id}' may already be defined there; fix that file first");
+
             Directory.CreateDirectory(AppsDir);
             WriteAtomic(Path.Combine(AppsDir, app.Id + ".json"), JsonSerializer.Serialize(app, Json));
             Written?.Invoke($"apps/{app.Id}.json ({app.Shortcuts.Count} shortcuts)");
@@ -202,26 +247,59 @@ public sealed class ConfigStore
         if (string.IsNullOrWhiteSpace(s.Keys))
             throw new ArgumentException("a shortcut needs its keys", nameof(s));
 
-        var app = Config.Apps.FirstOrDefault(a => a.Id == appId);
-        if (app == null) { app = new AppConfig { Id = appId, Name = appId }; Config.Apps.Add(app); }
+        // Edit what is on disk now, not what this process read when it started. An MCP server
+        // stays up for hours; saving its old copy of the app would drop every shortcut added
+        // by hand in the meantime.
+        Reload();
+
+        var app = Config.Apps.FirstOrDefault(a => a.Id == appId) ?? new AppConfig { Id = appId, Name = appId };
         if (app.Shortcuts.Any(x => x.Keys == s.Keys && x.Action == s.Action)) return false;
-        app.Shortcuts.Add(s); SaveApp(app); return true;
+        SaveApp(WithShortcuts(app, app.Shortcuts.Append(s)));
+        return true;
     }
 
     public bool RemoveShortcut(string appId, string keys)
     {
+        Reload(); // same reason as AddShortcut
+
         var app = Config.Apps.FirstOrDefault(a => a.Id == appId);
-        if (app == null) return false;
-        var n = app.Shortcuts.RemoveAll(x => x.Keys == keys);
-        if (n > 0) SaveApp(app);
-        return n > 0;
+        if (app == null || !app.Shortcuts.Any(x => x.Keys == keys)) return false;
+        SaveApp(WithShortcuts(app, app.Shortcuts.Where(x => x.Keys != keys)));
+        return true;
     }
 
+    /// <summary>
+    /// A copy to save, leaving the loaded app alone. If the save throws, memory must still
+    /// match the disk: an add that stayed in memory would answer "already exists" to the retry
+    /// and never be written.
+    /// </summary>
+    private static AppConfig WithShortcuts(AppConfig app, IEnumerable<Shortcut> shortcuts) => new()
+    {
+        Id = app.Id,
+        Name = app.Name,
+        Priority = app.Priority,
+        ProcessNames = app.ProcessNames,
+        ExeNames = app.ExeNames,
+        TitleContains = app.TitleContains,
+        Shortcuts = shortcuts.ToList(),
+    };
+
+    /// <summary>
+    /// The main file as an editable tree — only if <see cref="Reload"/> would accept it.
+    ///
+    /// Valid JSON is not enough. A file that parses but does not load (an array at the top
+    /// level, <c>"width": "460"</c>) leaves the store holding defaults, and writing those back
+    /// would replace exactly the block the user still has to repair.
+    /// </summary>
     private JsonObject ReadMainForEdit()
     {
         Directory.CreateDirectory(ConfigDir);
         if (!File.Exists(MainPath)) return new JsonObject();
-        return JsonNode.Parse(File.ReadAllText(MainPath)) as JsonObject ?? new JsonObject();
+
+        var text = File.ReadAllText(MainPath);
+        JsonSerializer.Deserialize<GlobalConfig>(text); // throws JsonException, as Reload reports it
+        return JsonNode.Parse(text) as JsonObject
+            ?? throw new JsonException("shortcuts.json: the top level must be a JSON object");
     }
 
     /// <summary>

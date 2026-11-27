@@ -96,12 +96,13 @@ Small, real, and left alone because none of them bites in the shipped configs.
 - **A pure-black backdrop reads as "no sample".** `BackdropStats.Empty` is `(0,0,0,0)`, which
   is also what a black, perfectly flat screen measures as, so that sample is discarded and
   the previous halo weight sticks. Make "no sample" a nullable instead of a magic value.
-- **Ambient mode never re-samples the backdrop.** Sampling only runs while the panel is
-  hidden, and in `ambient` it never is, so the halo keeps whatever it measured first.
+- **Ambient mode never samples the backdrop.** Sampling only runs on a tick where the panel
+  is faded out (`Refresh`: `Target <= 0.001`), and in `ambient` it never is, so a session
+  started in `ambient` keeps the default halo — there is no first measurement to keep.
 - **The settings window goes stale after *Reload config*.** The model is re-read, but the
   sliders keep showing the values from when the window opened.
 - **`.exe` is stripped anywhere in a name**, not just at the end (`Matcher.Norm`), so
-  `my.executor` and `myutor` compare equal. Harmless today; `EndsWith` is the fix.
+  `my.executor` and `mycutor` compare equal. Harmless today; `EndsWith` is the fix.
 
 ## 10. Feature ideas from the same review
 

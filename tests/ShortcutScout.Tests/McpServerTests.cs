@@ -64,6 +64,55 @@ public class McpServerTests
     public void MalformedRequests_AreInvalidRequest(string line) =>
         Assert.AreEqual(McpServer.InvalidRequest, Send(line).GetProperty("error").GetProperty("code").GetInt32());
 
+    [DataTestMethod]
+    // No id, but not notifications either: only a well-formed request can be one.
+    [DataRow("{}")]
+    [DataRow("""{"jsonrpc":"2.0","method":42}""")]
+    // An object or array is not a legal id, so it cannot be echoed into the response.
+    [DataRow("""{"jsonrpc":"2.0","id":{"a":1},"method":"ping"}""")]
+    [DataRow("""{"jsonrpc":"2.0","id":[1],"method":"ping"}""")]
+    public void MessagesWithoutAUsableId_AreInvalidRequest_WithANullId(string line)
+    {
+        var response = Send(line);
+
+        Assert.AreEqual(McpServer.InvalidRequest, response.GetProperty("error").GetProperty("code").GetInt32());
+        Assert.AreEqual(JsonValueKind.Null, response.GetProperty("id").ValueKind);
+    }
+
+    [TestMethod]
+    public void AMethodThatCannotBeDecoded_IsAnError_AndTheSessionCarriesOn()
+    {
+        // A lone high surrogate, escaped: the parser accepts it and decoding the string throws.
+        var escape = (char)92 + "ud800";
+        var response = Send("""{"jsonrpc":"2.0","id":5,"method":"ESC"}""".Replace("ESC", escape));
+
+        Assert.AreEqual(McpServer.InvalidRequest, response.GetProperty("error").GetProperty("code").GetInt32());
+        Assert.AreEqual(5, response.GetProperty("id").GetInt32());
+        Assert.AreEqual(9, Send("""{"jsonrpc":"2.0","id":9,"method":"ping"}""").GetProperty("id").GetInt32());
+    }
+
+    [TestMethod]
+    public void ABatch_IsAnsweredEntryByEntry_InOneArray()
+    {
+        var replies = Send("""
+            [ {"jsonrpc":"2.0","id":1,"method":"tools/list"},
+              {"jsonrpc":"2.0","method":"notifications/initialized"},
+              7,
+              {"jsonrpc":"2.0","id":"p","method":"ping"} ]
+            """.ReplaceLineEndings(" "));
+
+        Assert.AreEqual(3, replies.GetArrayLength(), "the notification is the only entry with no reply");
+        Assert.AreEqual(1, replies[0].GetProperty("id").GetInt32());
+        Assert.IsTrue(replies[0].GetProperty("result").TryGetProperty("tools", out _));
+        Assert.AreEqual(McpServer.InvalidRequest, replies[1].GetProperty("error").GetProperty("code").GetInt32());
+        Assert.AreEqual("p", replies[2].GetProperty("id").GetString());
+    }
+
+    [TestMethod]
+    public void ABatchOfOnlyNotifications_GetsNoReply() =>
+        Assert.IsNull(_server.Handle(
+            """[{"jsonrpc":"2.0","method":"notifications/initialized"},{"jsonrpc":"2.0","method":"notifications/cancelled"}]"""));
+
     [TestMethod]
     public void UnknownMethod_IsMethodNotFound_AndEchoesTheId()
     {

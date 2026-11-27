@@ -25,7 +25,7 @@ public sealed class McpServer
 
     private readonly ConfigStore _store;
 
-    // Relaxed encoder keeps keys readable for agents (Ctrl+Z, not Ctrl+Z).
+    // Relaxed encoder keeps keys readable for agents ("Ctrl+Z" with a literal plus, not a unicode escape).
     private static readonly JsonSerializerOptions JsonOut = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
@@ -53,7 +53,8 @@ public sealed class McpServer
 
     /// <summary>
     /// Handle one line. Returns the response line, or <c>null</c> when nothing may be sent:
-    /// a JSON-RPC notification (no <c>id</c>) never gets a reply, not even an error. Never throws.
+    /// a JSON-RPC notification (no <c>id</c>) never gets a reply, not even an error. Never throws
+    /// — the stdio loop has no per-line catch, so an escaped exception would end the session.
     /// </summary>
     public string? Handle(string line)
     {
@@ -64,27 +65,51 @@ public sealed class McpServer
         using (doc)
         {
             var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
-                return Error("null", InvalidRequest, "expected a single JSON-RPC request object");
+            if (root.ValueKind != JsonValueKind.Array) return HandleOne(root);
 
-            var isNotification = !root.TryGetProperty("id", out var idEl);
-            var id = isNotification ? "null" : idEl.GetRawText();
-
-            if (!root.TryGetProperty("method", out var m) || m.ValueKind != JsonValueKind.String)
-                return isNotification ? null : Error(id, InvalidRequest, "missing method");
-            var method = m.GetString() ?? "";
-
-            // Nothing a client notifies us of needs acting on (initialized, cancelled, ...).
-            if (isNotification) return null;
-
-            try
-            {
-                var result = Dispatch(method, root);
-                return $"{{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{result.ToJsonString(JsonOut)}}}";
-            }
-            catch (RpcException ex) { return Error(id, ex.Code, ex.Message); }
-            catch (Exception ex) { return Error(id, InternalError, ex.Message); }
+            // A batch. Protocol revision 2025-03-26, which this server still negotiates, obliges
+            // a server to accept them: each entry is answered on its own, the replies go back
+            // as one array, and a batch of nothing but notifications gets no reply at all.
+            if (root.GetArrayLength() == 0) return Error("null", InvalidRequest, "empty batch");
+            var replies = root.EnumerateArray().Select(HandleOne).Where(r => r != null).ToList();
+            return replies.Count == 0 ? null : "[" + string.Join(",", replies) + "]";
         }
+    }
+
+    private string? HandleOne(JsonElement message)
+    {
+        if (message.ValueKind != JsonValueKind.Object)
+            return Error("null", InvalidRequest, "expected a JSON-RPC request object");
+
+        // An id we could not echo back as a valid response id is answered with null instead.
+        var hasId = message.TryGetProperty("id", out var idEl);
+        if (hasId && idEl.ValueKind is not (JsonValueKind.String or JsonValueKind.Number or JsonValueKind.Null))
+            return Error("null", InvalidRequest, "id must be a string or a number");
+        var id = hasId ? idEl.GetRawText() : "null";
+
+        // Only a well-formed request without an id is a notification. An object with no usable
+        // method is just invalid, and is told so (with a null id) rather than silently dropped.
+        if (!message.TryGetProperty("method", out var m) || m.ValueKind != JsonValueKind.String)
+            return Error(id, InvalidRequest, "missing method");
+
+        string method;
+        try { method = m.GetString() ?? ""; }
+        catch (InvalidOperationException)
+        {
+            // The parser accepts an unpaired surrogate escape; decoding it is what fails.
+            return Error(id, InvalidRequest, "method is not valid text");
+        }
+
+        // Nothing a client notifies us of needs acting on (initialized, cancelled, ...).
+        if (!hasId) return null;
+
+        try
+        {
+            var result = Dispatch(method, message);
+            return $"{{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{result.ToJsonString(JsonOut)}}}";
+        }
+        catch (RpcException ex) { return Error(id, ex.Code, ex.Message); }
+        catch (Exception ex) { return Error(id, InternalError, ex.Message); }
     }
 
     private static string Error(string rawId, int code, string message) =>

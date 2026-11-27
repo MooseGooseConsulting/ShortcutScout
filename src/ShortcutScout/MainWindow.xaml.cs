@@ -148,7 +148,6 @@ public partial class MainWindow : Window
         }
 
         var settings = Settings;
-        _peekReasonThisTick = null;
 
         // Triggers first: StartPeek inside here sets `_peekUntil` and advances the rotation
         // slot. Computing opacity before it meant a peek that began on this tick was applied
@@ -184,6 +183,10 @@ public partial class MainWindow : Window
                 : "ambient";
             AppLog.Info($"reveal: {why} app='{app?.Id}' slot={_rotationSlot}");
         }
+
+        // Cleared once logged, not at the top of the tick: ApplySettings can start a peek
+        // between two ticks, and its reason has to survive until this line reports it.
+        _peekReasonThisTick = null;
 
         // The slide clock restarts on a fresh appearance (so rows never change the instant the
         // panel arrives) and on every step; `Decide` owns both decisions so they stay testable.
