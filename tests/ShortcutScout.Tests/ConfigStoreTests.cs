@@ -365,4 +365,28 @@ public class ConfigStoreTests
         }
         finally { Directory.Delete(dir, true); }
     }
+
+    [DataTestMethod]
+    // Half-way through a hand edit: the file no longer parses.
+    [DataRow("""{"id":"myapp","title_contains":["My App"],"shortcuts":[{"keys":"Ctrl+1","action":"One"},""")]
+    // Parses, but is somebody else's definition under this file name.
+    [DataRow("""{"id":"other","shortcuts":[{"keys":"Ctrl+9","action":"Nine"}]}""")]
+    public void AnAppFileThatDidNotYieldThisApp_IsNotOverwrittenByAnAdd(string onDisk)
+    {
+        var dir = NewDir("unloaded-app");
+        try
+        {
+            var file = Path.Combine(dir, "apps", "myapp.json");
+            File.WriteAllText(file, """{"id":"myapp","title_contains":["My App"],"shortcuts":[{"keys":"Ctrl+1","action":"One"}]}""");
+            var store = new ConfigStore(dir);
+
+            File.WriteAllText(file, onDisk);
+
+            // "myapp" is not loaded any more, so the add would start from an empty app and
+            // write it over this file: the matching rules and every other shortcut gone.
+            Assert.ThrowsException<IOException>(() => store.AddShortcut("myapp", new Shortcut("Ctrl+2", "Two")));
+            Assert.AreEqual(onDisk, File.ReadAllText(file));
+        }
+        finally { Directory.Delete(dir, true); }
+    }
 }
