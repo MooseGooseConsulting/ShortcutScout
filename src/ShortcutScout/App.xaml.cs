@@ -206,6 +206,10 @@ public partial class App : System.Windows.Application
     {
         var i = Array.IndexOf(args, "--cli");
         var cmd = i >= 0 && i + 1 < args.Length ? args[i + 1] : "list";
+
+        // No tray here to show a balloon; without this a skipped file just looks like missing apps.
+        foreach (var error in _store.LoadErrors) Console.Error.WriteLine("warning: " + error);
+
         try { RunCliCommand(cmd, args, i); }
         catch (Exception ex) when (ex is ArgumentException or IOException or System.Text.Json.JsonException
                                        or UnauthorizedAccessException)
