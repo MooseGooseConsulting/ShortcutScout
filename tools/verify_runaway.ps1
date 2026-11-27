@@ -1,3 +1,15 @@
+param([switch]$AllowCursorControl)
+
+# This script moves the real mouse pointer / injects real input, which takes over the
+# desktop of whoever is using the machine. It must never run as part of a normal build or
+# verification pass; pass -AllowCursorControl when you deliberately want it to drive the
+# pointer (ideally inside a disposable VM, never on a work desktop).
+if (-not $AllowCursorControl) {
+    Write-Output "REFUSED: this script moves the real mouse pointer."
+    Write-Output "Re-run with -AllowCursorControl to approve it, and prefer a disposable VM."
+    exit 2
+}
+
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;

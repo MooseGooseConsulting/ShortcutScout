@@ -60,6 +60,14 @@ line spacing, key/action colours, halo strength, dock corner and placement strat
   / Config / Mcp) so failures name themselves. No behaviour change.
 - **No CI.** A `windows-latest` workflow running `dotnet test` is ~15 lines and would catch a
   WPF build break before a push does.
+- **Cursor-moving verification belongs in a VM.** `tools/verify_placement.ps1`,
+  `tools/verify_runaway.ps1` and `tools/measure_idle.ps1` drive the real pointer
+  (`SetCursorPos` / injected `mouse_event`). They are now refused unless passed
+  `-AllowCursorControl`, but the intended home is a disposable Windows VM with a
+  known DPI and work area, so the sweep is reproducible and never runs on a work
+  desktop. Nothing in the build or test flow depends on them: the geometry maths is
+  covered by the unit-test sweep, and the trace already records cursor and placement
+  per tick, which is enough to check the dodge read-only.
 - **`SHORTCUTSCOUT_TRACE=1` writes unbounded** to `%TEMP%\shortcutscout-trace.log`, one line
   every 500 ms while hidden. Fine for a session, worth a size cap before it runs for days.
 - **Only reveals are worth logging permanently.** One line per reveal with its reason

@@ -52,7 +52,9 @@ dotnet test ShortcutScout.sln               # 60 tests, all in
 - **Never run `tools/verify_placement.ps1`, `tools/verify_runaway.ps1`, or
   `tools/measure_idle.ps1` without the user's explicit permission** — they move or
   inject the user's real mouse input (`SetCursorPos` in the first two, `mouse_event`
-  in `measure_idle.ps1`), which hijacks their work.
+  in `measure_idle.ps1`), which hijacks their work. Each one now refuses to run
+  without `-AllowCursorControl` and exits 2, so a stray invocation is harmless; the
+  intended home for them is a disposable VM, not a working desktop.
   Prefer read-only verification: user moves the mouse, agent reads the trace or the
   window rect (`tools/window_state.ps1`).
 - Display is 200% DPI. The app positions in DIPs, but what a script reports depends
