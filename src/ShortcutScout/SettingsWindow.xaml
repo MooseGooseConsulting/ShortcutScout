@@ -107,7 +107,7 @@
         <ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/>
       </Grid.ColumnDefinitions>
       <TextBlock Grid.Column="0" Text="Idle reveal after (s)"/>
-      <Slider x:Name="IdleSlider" AutomationProperties.Name="Idle reveal after" Grid.Column="1" Minimum="5" Maximum="300" SmallChange="5" TickFrequency="5" IsSnapToTickEnabled="True"/>
+      <Slider x:Name="IdleSlider" AutomationProperties.Name="Idle reveal after" Grid.Column="1" Minimum="0" Maximum="300" SmallChange="5" TickFrequency="5" IsSnapToTickEnabled="True"/>
       <TextBlock x:Name="IdleValue" Grid.Column="2" Style="{StaticResource Value}"/>
     </Grid>
 
