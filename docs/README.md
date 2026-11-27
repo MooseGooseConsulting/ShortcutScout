@@ -19,5 +19,5 @@ Rules that keep these from drifting:
 - `SPEC.md` is frozen. If a requirement needs to change, change `REQUIREMENTS.md`'s reading of
   it and say why.
 
-Not yet written: an `AGENTS.md` for contributors (build/test/verify conventions) and a
-standalone architecture note — currently the design rationale lives in `README.md`.
+Not yet written: a standalone architecture note — currently the design rationale lives in
+`README.md`. Contributor conventions (build/test/verify) live in `../AGENTS.md`.
