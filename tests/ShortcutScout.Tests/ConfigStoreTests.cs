@@ -187,6 +187,11 @@ public class ConfigStoreTests
     [DataRow("")]
     [DataRow("   ")]
     [DataRow("con.")]
+    [DataRow("con")]      // Windows device names: apps/con.json is the console, not a file
+    [DataRow("NUL")]
+    [DataRow("com1")]
+    [DataRow("Lpt9")]
+    [DataRow("aux.backup")]
     public void AppIdsThatAreNotPlainFileNames_AreRefused(string id)
     {
         var dir = NewDir("ids");
@@ -206,7 +211,8 @@ public class ConfigStoreTests
     [TestMethod]
     public void OrdinaryAppIds_AreAccepted()
     {
-        foreach (var id in new[] { "chrome", "claudecode", "vs-code", "app_2", "notepad++", "My App", "a.b" })
+        foreach (var id in new[] { "chrome", "claudecode", "vs-code", "app_2", "notepad++", "My App", "a.b",
+                                   "console", "com10", "config", "null" })
             Assert.IsTrue(ConfigStore.IsValidAppId(id), id);
     }
 
@@ -257,55 +263,106 @@ public class ConfigStoreTests
         }
         finally { Directory.Delete(dir, true); }
     }
-}
 
-[TestClass]
-public class ConfigLocatorTests
-{
-    [TestMethod]
-    public void FindsTheRepoConfigByWalkingUpFromTheBuildOutput()
+    [DataTestMethod]
+    // Valid JSON that Reload rejects. The store is holding defaults, so writing its overlay
+    // back would replace the very block the user still has to repair.
+    [DataRow("""[ { "overlay": { "mode": "ambient" } } ]""")]
+    [DataRow("""{ "overlay": { "mode": "ambient", "width": "460" } }""")]
+    [DataRow("""{ "overlay": { "mode": "ambient" }, "apps": { "id": "global" } }""")]
+    [DataRow("null")]
+    public void SaveOverlay_RefusesToClobberAMainFileThatParsesButDoesNotLoad(string unloadable)
     {
-        var root = Path.Combine(Path.GetTempPath(), "ss-loc-" + Guid.NewGuid().ToString("N"));
-        var bin = Path.Combine(root, "src", "ShortcutScout", "bin", "Release", "net8.0-windows");
-        Directory.CreateDirectory(bin);
-        Directory.CreateDirectory(Path.Combine(root, "config", "apps"));
+        var dir = NewDir("noclobber2");
         try
         {
-            Assert.AreEqual(
-                Path.Combine(root, "config"),
-                ConfigLocator.Find(new[] { bin }));
+            File.WriteAllText(MainFile(dir), unloadable);
+            var store = new ConfigStore(dir);
+
+            try { store.SaveOverlay(); Assert.Fail("expected the save to be refused"); }
+            catch (System.Text.Json.JsonException) { }
+            Assert.AreEqual(unloadable, File.ReadAllText(MainFile(dir)));
         }
-        finally { Directory.Delete(root, true); }
+        finally { Directory.Delete(dir, true); }
     }
 
     [TestMethod]
-    public void IgnoresAnUnrelatedFolderThatHappensToBeCalledConfig()
+    public void AnEdit_KeepsShortcutsAddedByHandSinceTheStoreLoaded()
     {
-        var root = Path.Combine(Path.GetTempPath(), "ss-loc-" + Guid.NewGuid().ToString("N"));
-        var elsewhere = Path.Combine(root, "other-project");
-        var install = Path.Combine(root, "install");
-        Directory.CreateDirectory(Path.Combine(elsewhere, "config")); // no shortcuts.json, no apps/
-        Directory.CreateDirectory(Path.Combine(install, "config"));
-        File.WriteAllText(Path.Combine(install, "config", "shortcuts.json"), "{}");
+        var dir = NewDir("stale");
         try
         {
-            Assert.AreEqual(
-                Path.Combine(install, "config"),
-                ConfigLocator.Find(new[] { elsewhere, install }));
+            File.WriteAllText(MainFile(dir), MainWithGlobal);
+            File.WriteAllText(Path.Combine(dir, "apps", "myapp.json"),
+                """{"id":"myapp","shortcuts":[{"keys":"Ctrl+1","action":"One"}]}""");
+            var store = new ConfigStore(dir); // a long-lived MCP server's view
+
+            // Hand edits behind its back, to an inline app and to an app file.
+            File.WriteAllText(MainFile(dir), MainWithGlobal.Replace(
+                """[ { "keys": "Alt+Tab", "action": "Switch window" } ]""",
+                """[ { "keys": "Alt+Tab", "action": "Switch window" }, { "keys": "Win+V", "action": "Clipboard" } ]"""));
+            File.WriteAllText(Path.Combine(dir, "apps", "myapp.json"),
+                """{"id":"myapp","shortcuts":[{"keys":"Ctrl+1","action":"One"},{"keys":"Ctrl+2","action":"Two"}]}""");
+
+            Assert.IsTrue(store.AddShortcut("global", new Shortcut("Win+R", "Run")));
+            Assert.IsTrue(store.RemoveShortcut("myapp", "Ctrl+1"));
+
+            var reloaded = new ConfigStore(dir);
+            CollectionAssert.AreEqual(new[] { "Alt+Tab", "Win+V", "Win+R" },
+                reloaded.Config.Apps.Single(a => a.Id == "global").Shortcuts.Select(s => s.Keys).ToArray());
+            CollectionAssert.AreEqual(new[] { "Ctrl+2" },
+                reloaded.Config.Apps.Single(a => a.Id == "myapp").Shortcuts.Select(s => s.Keys).ToArray());
         }
-        finally { Directory.Delete(root, true); }
+        finally { Directory.Delete(dir, true); }
     }
 
     [TestMethod]
-    public void FallsBackToAConfigFolderBesideTheFirstCandidate()
+    public void AnEditThatCouldNotBeSaved_CanBeRetriedOnceTheFileIsRepaired()
     {
-        var root = Path.Combine(Path.GetTempPath(), "ss-loc-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(root);
+        var dir = NewDir("retry");
         try
         {
-            // Bounded by maxDepth, so a real config further up the temp tree can't be found.
-            Assert.AreEqual(Path.Combine(root, "config"), ConfigLocator.Find(new[] { root }, maxDepth: 0));
+            File.WriteAllText(MainFile(dir), MainWithGlobal);
+            var store = new ConfigStore(dir);
+
+            File.WriteAllText(MainFile(dir), "{ \"overlay\": ");
+            try { store.AddShortcut("global", new Shortcut("Win+V", "Clipboard")); Assert.Fail("expected the save to fail"); }
+            catch (System.Text.Json.JsonException) { }
+            try { store.RemoveShortcut("global", "Alt+Tab"); Assert.Fail("expected the save to fail"); }
+            catch (System.Text.Json.JsonException) { }
+
+            CollectionAssert.AreEqual(new[] { "Alt+Tab" },
+                store.Config.Apps.Single(a => a.Id == "global").Shortcuts.Select(s => s.Keys).ToArray(),
+                "an edit that never reached the disk must not linger in memory");
+
+            // Lingering in memory, the add would now answer "already exists" and never be written.
+            File.WriteAllText(MainFile(dir), MainWithGlobal);
+            Assert.IsTrue(store.AddShortcut("global", new Shortcut("Win+V", "Clipboard")));
+            Assert.AreEqual(2, new ConfigStore(dir).Config.Apps.Single(a => a.Id == "global").Shortcuts.Count);
         }
-        finally { Directory.Delete(root, true); }
+        finally { Directory.Delete(dir, true); }
+    }
+
+    [TestMethod]
+    public void WhileTheMainFileIsUnreadable_NoNewAppFileIsCreated()
+    {
+        var dir = NewDir("unknown-inline");
+        try
+        {
+            // The first load fails, so the store cannot know that "global" lives in this file.
+            File.WriteAllText(MainFile(dir), MainWithGlobal.TrimEnd().TrimEnd('}'));
+            File.WriteAllText(Path.Combine(dir, "apps", "myapp.json"),
+                """{"id":"myapp","shortcuts":[{"keys":"Ctrl+1","action":"One"}]}""");
+            var store = new ConfigStore(dir);
+            Assert.AreEqual(1, store.LoadErrors.Count);
+
+            // apps/global.json would be ignored as a duplicate as soon as the brace is restored.
+            Assert.ThrowsException<IOException>(() => store.AddShortcut("global", new Shortcut("Win+V", "Clipboard")));
+            Assert.IsFalse(File.Exists(Path.Combine(dir, "apps", "global.json")));
+
+            // An app that was loaded from apps/ is known to live there and stays editable.
+            Assert.IsTrue(store.AddShortcut("myapp", new Shortcut("Ctrl+2", "Two")));
+        }
+        finally { Directory.Delete(dir, true); }
     }
 }
