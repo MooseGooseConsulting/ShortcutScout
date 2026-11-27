@@ -11,12 +11,12 @@ Verified on: Windows 11, .NET 8.0.428, 200% DPI display (2880×1800 physical, 14
 | 1 | Detect the focused window, show shortcuts for *that* app | **Met** |
 | 2 | General, not one app | **Met** |
 | 3 | Discovery — surface shortcuts you don't know exist | **Partial** |
-| 4 | The list gently changes over time | **Partial** |
+| 4 | The list gently changes over time | **Met** |
 | 5 | Transparent, topmost, click-through, invisible when off | **Met** |
 | 6 | Run away from the cursor | **Met** (with a caveat) |
 | 7 | Aware of the focused window without stealing focus | **Met** |
 | 8 | Nail the mechanics before the content | **Met** |
-| 9 | Mostly automatic; hotkey only for hiding | **Partial** — the automation rarely fires |
+| 9 | Mostly automatic; hotkey only for hiding | **Met** |
 | 10 | More visible after 30s idle | **Met** |
 | 11 | Human-editable config files | **Met** |
 | 12 | Easy MCP / agent integration | **Met** |
@@ -58,17 +58,21 @@ with it. Discovery entries are now visually identical to core entries, so the ap
 unknown shortcuts but doesn't *signal* that they're new. The mechanism works; the cue is
 missing.
 
-## 4. The list gently changes over time — Partial
+## 4. The list gently changes over time — Met
 
-`Rotation.Slot = 3 minutes`; the selection only changes on a slot boundary, so it's stable
-to read and then quietly refreshes (`Rotation_ChangesAcrossSlots`,
-`Rotation_SlotAdvancesOnlyEveryThreeMinutes`, `Rotation_NeverExceedsMaxOrRepeatsAnEntry`).
-Core entries are interleaved 2:1 with discovery entries.
+Rotation is counted in **appearances**, not wall-clock time: `MainWindow.StartPeek` advances
+`_rotationSlot` each time the panel is about to appear, and rows are built from that slot
+*after* the advance, so the new slice is what fades in. Core entries are interleaved 2:1 with
+`discovery` entries (`Rotation_SurfacesDiscoveryItems`, `Rotation_ChangesAcrossSlots`,
+`Rotation_NeverExceedsMaxOrRepeatsAnEntry`).
 
-**Why partial:** rotation is driven by wall-clock elapsed time since launch, and the panel is
-hidden most of the time — so it rotates while nobody is looking. It also re-ranks on render,
-which means the "gentle change" is only ever observed if the panel happens to be visible at a
-slot boundary.
+The earlier design rotated every 3 minutes of uptime, spent while the panel was hidden — you
+could watch it for an hour and see the same rows. Counting appearances means every look is a
+different slice.
+
+**Limit:** rotation is driven by reveals, so it only moves when the panel appears. In `ambient`
+mode that means a window switch or a periodic re-peek (`re_peek_seconds`); with periodic
+reveals disabled and no window switches, an ambient list is static.
 
 ## 5. Transparent, always-on-top, click-through, fully invisible when off — Met
 
@@ -115,30 +119,47 @@ than arriving), backdrop sampling off the UI thread, and geometry with hysteresi
 `IdlePolicy` is unit-tested to prove no mode can produce an unreadable half-opacity
 (`NoMode_ProducesAnUnreadableMidOpacity`).
 
-## 9. Mostly automatic; the hotkey is only occasional — **Partial**, and this is the one that bites
+## 9. Mostly automatic; the hotkey is only occasional — Met
 
-**What is built:** `peek` mode (the default) hides the panel while you work, shows it for 6 s
-when you switch to a configured app, and reveals it after 30 s idle. `Ctrl+Alt+S` toggles
-"hidden completely". There is a tray icon as a second escape hatch.
+`peek` mode (the default) hides the panel while you work, reveals it in four situations, and
+`Ctrl+Alt+S` exists only to make it go away entirely:
 
-**Why it fails in practice:** during a normal working session the panel is *never* revealed.
+| Trigger | Detail |
+|---|---|
+| Foreground **window** change | rate-limited to one per 4 s (`MinPeekGapSeconds`) so alt-tabbing doesn't strobe |
+| **Matched app** change | catches tab switches — Devin → ChatGPT is a new app in the same Chrome window, so the handle never changes |
+| **Periodic re-peek** | `re_peek_seconds` (default 90 s) measured from the last reveal; `0` disables it |
+| **Idle** | `idle_threshold_seconds` (30 s) of no input |
 
-- The peek requires the **matched app to change**. Every unconfigured window falls back to
-  `global`, so Freebuff, the terminal, Explorer and unmatched Chrome are all one and the same
-  app as far as the matcher is concerned. Moving between them is not an app change, so no peek.
-- The idle reveal needs 30 s of **zero input**. Typing or moving the mouse resets it
-  continuously, so while working it never triggers.
+This requirement was failing badly before: a peek required the *matched app* to change, and
+every unconfigured window falls back to `global` — so Freebuff, the terminal and Explorer
+were all "the same app" and nothing ever revealed. Measured over a real session: one peek at
+startup, `opacity=1.00` for 6 s, then `target=0.00` for twelve hours, with a healthy process
+and a correctly-styled window throughout. From the outside that is indistinguishable from
+"not running", which is exactly how it was reported.
 
-Measured over a real session: one peek at startup, `opacity=1.00` for 6 s, then
-`target=0.00` forever. The process ran for 12 hours with a valid, correctly-styled window
-that never became visible. From the user's side that is indistinguishable from "not running" —
-which is exactly how it was reported.
+Re-measured after the fix, with `re_peek_seconds` set to 10:
 
-This is the highest-value defect in the project. See [`NEXT.md`](NEXT.md#1-the-panel-almost-never-appears).
+```
+22:49:16 peek started (window change) slot=1
+22:49:22 peek started (window change) slot=2
+22:49:32 peek started (re-peek)       slot=3   <- 10 s after the previous reveal
+22:49:42 peek started (window change) slot=4
+```
+
+The re-peek fires at the configured interval, not every 4 s — an earlier version left
+`_lastRevealAt` at its initial value, which made `RePeekDue` true permanently and turned the
+4 s floor into a strobe.
 
 ## 10. More visible after 30 s idle — Met
 
 `IdlePolicy.OpacityFor`: `idle >= idle_threshold_seconds (30)` → `idle_opacity` (`1.0`).
+
+**Idleness is measured twice.** `GetLastInputInfo` alone never fired on the target machine — it
+sat at 0-2 s for 40 s of an untouched desktop, because something resets the OS input timer
+without moving the cursor. `IdlePolicy.CombineIdle` takes the larger of OS input-idle and
+measured pointer stillness, so the 30 s reveal works either way
+(`Idle_FallsBackToPointerStillness_WhenOsIdleNeverGrows`).
 `Idle_ThresholdIsExclusiveAt30Seconds` pins the boundary (29 s → hidden, 30 s → full).
 
 Trace from the running app: `idle=31s opacity=1.00`, then `idle=0s opacity=0.92` on return.

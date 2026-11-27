@@ -44,14 +44,23 @@ public partial class MainWindow : Window
     private TimeSpan _lastPeekStart = TimeSpan.FromDays(-1);
     private TimeSpan _lastRevealAt;
 
-    /// <summary>How many times the panel has become visible; drives rotation.</summary>
-    private int _revealCount;
 
     private long _lastWindowKey;
 
+    // Pointer stillness, tracked independently of GetLastInputInfo (see CurrentIdleSeconds).
+    private double _lastPointerX = double.NaN, _lastPointerY = double.NaN;
+    private TimeSpan _pointerMovedAt = TimeSpan.Zero;
+
+    /// <summary>Counts actual relocations, so each dodge picks a different clear position.</summary>
+    private int _placementCount;
+
+    private const double PointerMoveThresholdPx = 6;
+
     /// <summary>Which slice of the shortcut list is currently on screen.</summary>
     private long _rotationSlot;
-    private bool _rotatedWhileHidden;
+
+    /// <summary>Set when the current peek already advanced the rotation.</summary>
+    private bool _peekCountedRotation;
 
     private static readonly bool Tracing =
         Environment.GetEnvironmentVariable("SHORTCUTSCOUT_TRACE") == "1";
@@ -94,6 +103,11 @@ public partial class MainWindow : Window
         ApplyLayout();
         _lastSignature = ""; // rebuild rows at the new size / count
         UpdateContent(Settings);
+
+        // Growing while docked against the right or bottom edge would push the text off
+        // screen, and the normal dodge only re-docks when the cursor is close. Re-place
+        // now so a settings change can never strand the panel out of bounds.
+        RunAwayFromCursor();
     }
 
     private void ApplyLayout()
@@ -119,30 +133,32 @@ public partial class MainWindow : Window
         }
 
         var settings = Settings;
-        UpdateContent(settings);
 
-        var idle = ForceIdle ? int.MaxValue : Win32.IdleSeconds();
+        var idle = ForceIdle ? int.MaxValue : CurrentIdleSeconds();
         var peekRemaining = (_peekUntil - _clock.Elapsed).TotalSeconds;
 
         var target = IdlePolicy.OpacityFor(settings, _toggle.Hidden, idle, peekRemaining);
         if (_obstructed && !_toggle.Hidden) target = Math.Min(target, 0.14);
 
-        if (target > 0.001)
+        // Rotation counts *appearances*. A peek advances the slot when it starts (which is
+        // the only event ambient mode ever gets, since the panel never becomes invisible),
+        // and an appearance not caused by a peek — an idle reveal, or an un-hide whose peek
+        // was refused by the anti-strobe floor — advances it here. The flag keeps one
+        // appearance from being counted twice.
+        //
+        // This runs *before* UpdateContent: building the rows first meant the opening frame
+        // of an idle reveal showed the previous slice and then swapped under the fade.
+        if (target > 0.001 && _currentOpacity <= 0.001)
         {
-            _rotatedWhileHidden = false;
+            if (!_peekCountedRotation) _rotationSlot++;
+            _peekCountedRotation = false;
         }
-        else if (!_rotatedWhileHidden)
+        else if (target <= 0.001)
         {
-            // Advance the rotation the moment the panel goes away, not while it is on
-            // screen: the next appearance is then already built from the new slice, so
-            // rows never swap out from under you mid-peek.
-            _rotatedWhileHidden = true;
-            _revealCount++;
-            _rotationSlot++;
-            _lastSignature = "";
-            if (Tracing) Log($"rotation -> slot {_rotationSlot} (after reveal #{_revealCount})");
+            _peekCountedRotation = false;
         }
 
+        UpdateContent(settings);
         ApplyOpacity(target, settings);
 
         if (_toggle.Hidden) return;
@@ -153,6 +169,32 @@ public partial class MainWindow : Window
         RunAwayFromCursor();
 
         if (target <= 0.001) BeginBackdropSample();
+    }
+
+    /// <summary>
+    /// How long the user has been away.
+    ///
+    /// `GetLastInputInfo` alone is not reliable here: measured on this machine it never
+    /// exceeded 2s across 40s of a still, untouched desktop, so the 30s reveal could never
+    /// fire. Something resets the OS input timer without moving the cursor. Pointer stillness
+    /// gives a second signal, and the larger of the two wins.
+    /// </summary>
+    private int CurrentIdleSeconds()
+    {
+        var (px, py) = Win32.CursorPos();
+        var moved = double.IsNaN(_lastPointerX)
+            || Math.Abs(px - _lastPointerX) > PointerMoveThresholdPx
+            || Math.Abs(py - _lastPointerY) > PointerMoveThresholdPx;
+
+        if (moved)
+        {
+            _lastPointerX = px;
+            _lastPointerY = py;
+            _pointerMovedAt = _clock.Elapsed;
+        }
+
+        var still = (_clock.Elapsed - _pointerMovedAt).TotalSeconds;
+        return IdlePolicy.CombineIdle(Win32.IdleSeconds(), still);
     }
 
     /// <summary>
@@ -224,6 +266,40 @@ public partial class MainWindow : Window
         var fg = ForegroundReader.Read();
         var matched = Matcher.Match(_store.Config.Apps, fg);
         var app = matched ?? _store.Config.Apps.FirstOrDefault(a => a.Id == "global");
+        var appId = app?.Id ?? "";
+
+        // While explicitly hidden (Ctrl+Alt+S) a switch stays *pending*: consuming it would
+        // swallow the change, so un-hiding would show nothing until an unrelated trigger.
+        var windowKey = hwnd.ToInt64();
+        var window = RevealPolicy.ObserveWindow(_lastWindowKey, windowKey, _toggle.Hidden);
+        var windowChanged = window.Changed;
+
+        // Title-matched apps are detected per *tab*, not per window: switching from Devin
+        // to ChatGPT inside the same Chrome window changes the app but not the handle, so
+        // an app change has to stay a reveal trigger in its own right.
+        var appChanged = RevealPolicy.ObserveAppChange(_lastAppId, appId, _toggle.Hidden);
+
+        // Decide the reveal BEFORE building rows: StartPeek advances the rotation slot, so
+        // the slice that appears is the new one instead of swapping a tick later.
+        var triggered = windowChanged || appChanged;
+        var started = false;
+        if (app is { Shortcuts.Count: > 0 } && !_toggle.Hidden)
+        {
+            if (windowChanged) started = StartPeek(settings, "window change");
+            else if (appChanged) started = StartPeek(settings, "app change");
+            else if (IdlePolicy.RePeekDue(settings, _toggle.Hidden,
+                         (_clock.Elapsed - _lastRevealAt).TotalSeconds))
+                started = StartPeek(settings, "re-peek");
+        }
+
+        // A trigger that the anti-strobe floor rejected stays *pending* and is retried on the
+        // next tick: consuming it here would drop a real context switch on the floor (short
+        // peeks make the cooldown longer than the peek itself).
+        if (!_toggle.Hidden && (started || !triggered))
+        {
+            _lastWindowKey = windowKey;
+            _lastAppId = appId;
+        }
 
         var rows = new List<ShortcutRow>();
         if (app != null)
@@ -233,42 +309,41 @@ public partial class MainWindow : Window
                 rows.Add(new ShortcutRow(s.Keys, s.Action, s.Discovery, keyWidth));
         }
 
-        var signature = (app?.Id ?? "") + "|" + string.Join(";", rows.Select(r => r.Keys + "=" + r.Action));
-        if (signature != _lastSignature)
-        {
-            var firstRender = _lastSignature.Length == 0;
-            _lastSignature = signature;
-            _lastAppId = app?.Id ?? "";
+        var signature = appId + "|" + string.Join(";", rows.Select(r => r.Keys + "=" + r.Action));
+        if (signature == _lastSignature) return;
 
-            List.ItemsSource = rows;
-            EmptyHint.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        var firstRender = _lastSignature.Length == 0;
+        _lastSignature = signature;
 
-            // Re-fade the rows when the list changes under a visible panel.
-            if (rows.Count > 0 && !firstRender) RevealList();
-        }
+        List.ItemsSource = rows;
+        EmptyHint.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        if (rows.Count == 0 || _toggle.Hidden) return;
-
-        // Two reasons to show the list, and neither needs the matched *app* to change.
-        // Keying on the app meant every unconfigured window collapsed into "global", so
-        // moving between them counted as no change and the panel never appeared.
-        var windowKey = hwnd.ToInt64();
-        var windowChanged = windowKey != _lastWindowKey;
-        _lastWindowKey = windowKey;
-
-        if (windowChanged) StartPeek(settings, "window change");
-        else if (IdlePolicy.RePeekDue(settings, _toggle.Hidden,
-                     (_clock.Elapsed - _lastRevealAt).TotalSeconds))
-            StartPeek(settings, "re-peek");
+        // Re-fade the rows when the list changes under a visible panel.
+        if (rows.Count > 0 && !firstRender) RevealList();
     }
 
-    private void StartPeek(OverlaySettings settings, string reason)
+    /// <summary>Start a peek. Returns false when the anti-strobe floor refused it.</summary>
+    private bool StartPeek(OverlaySettings settings, string reason)
     {
-        if ((_clock.Elapsed - _lastPeekStart).TotalSeconds < MinPeekGapSeconds) return;
+        if ((_clock.Elapsed - _lastPeekStart).TotalSeconds < MinPeekGapSeconds) return false;
 
         _lastPeekStart = _clock.Elapsed;
+
+        // Measure the re-peek interval from here. Leaving this at its initial value made
+        // RePeekDue true forever after the first interval, so the panel re-appeared every
+        // four seconds and re_peek_seconds meant nothing.
+        _lastRevealAt = _clock.Elapsed;
+
         _peekUntil = _clock.Elapsed + TimeSpan.FromSeconds(Math.Max(1, settings.PeekSeconds));
-        if (Tracing) Log($"peek started for '{_lastAppId}' ({reason}) for {settings.PeekSeconds}s");
+
+        // Each appearance shows the next slice. Advancing on the peek (rather than on the
+        // hidden transition) also rotates in ambient mode, where the panel never goes
+        // invisible and the old code therefore froze the list.
+        _rotationSlot++;
+        _peekCountedRotation = true;
+
+        if (Tracing) Log($"peek started for '{_lastAppId}' ({reason}) slot={_rotationSlot} for {settings.PeekSeconds}s");
+        return true;
     }
 
     private void RevealList()
@@ -317,14 +392,17 @@ public partial class MainWindow : Window
         var placement = OverlayGeometry.Place(
             new CoreRect(Left, Top, Width, height),
             cursor.X, cursor.Y,
-            new CoreRect(work.X, work.Y, work.Width, work.Height));
+            new CoreRect(work.X, work.Y, work.Width, work.Height),
+            variety: _placementCount);
 
         _obstructed = !placement.Escaped;
 
-        if (placement.Escaped)
+        if (placement.Escaped &&
+            (Math.Abs(placement.X - Left) > 0.5 || Math.Abs(placement.Y - Top) > 0.5))
         {
-            if (Math.Abs(placement.X - Left) > 0.5) Left = placement.X;
-            if (Math.Abs(placement.Y - Top) > 0.5) Top = placement.Y;
+            Left = placement.X;
+            Top = placement.Y;
+            _placementCount++; // next dodge steps to a different clear position
         }
 
         if (Tracing)
