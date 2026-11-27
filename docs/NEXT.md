@@ -60,9 +60,6 @@ line spacing, key/action colours, halo strength, dock corner and placement strat
   / Config / Mcp) so failures name themselves. No behaviour change.
 - **No CI.** A `windows-latest` workflow running `dotnet test` is ~15 lines and would catch a
   WPF build break before a push does.
-- **No `AGENTS.md`.** Build/test/verify conventions live in this file and the README; the
-  branch also requires PRs to `main`, which a contributor can only discover by having a push
-  rejected.
 - **`SHORTCUTSCOUT_TRACE=1` writes unbounded** to `%TEMP%\shortcutscout-trace.log`, one line
   every 500 ms while hidden. Fine for a session, worth a size cap before it runs for days.
 - **Only reveals are worth logging permanently.** One line per reveal with its reason
