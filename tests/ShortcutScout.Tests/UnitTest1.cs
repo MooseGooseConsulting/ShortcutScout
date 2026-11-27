@@ -799,8 +799,67 @@ public class Tests
         var hidden = OverlayTicker.Decide(settings, hidden: true, idleSeconds: 0,
             peekRemainingSeconds: 6, currentOpacity: 0.9, rotationSlot: 2, peekCountedRotation: true);
         Assert.AreEqual(0, hidden.Target, 1e-9, "manual hide wins over everything");
+        Assert.IsFalse(hidden.Slide, "a hidden panel must not consume slices");
         Assert.AreEqual(2, hidden.RotationSlot);
         Assert.IsFalse(hidden.PeekCountedRotation, "a hidden tick clears the flag");
+    }
+
+    [TestMethod]
+    public void Slide_FiresOnlyWhileVisible_AndOnlyAfterTheFullInterval()
+    {
+        var settings = new OverlaySettings { RotateSeconds = 8 };
+
+        Assert.IsFalse(IdlePolicy.SlideDue(settings, visible: true, secondsSinceSlide: 7.9));
+        Assert.IsTrue(IdlePolicy.SlideDue(settings, visible: true, secondsSinceSlide: 8));
+        Assert.IsFalse(IdlePolicy.SlideDue(settings, visible: false, secondsSinceSlide: 60),
+            "a hidden panel must not consume slices");
+    }
+
+    [TestMethod]
+    public void Slide_ZeroHoldsTheListStill()
+    {
+        var settings = new OverlaySettings { RotateSeconds = 0 };
+        Assert.IsFalse(IdlePolicy.SlideDue(settings, visible: true, secondsSinceSlide: 600));
+    }
+
+    [TestMethod]
+    public void Slide_DefaultStepsWhileThePanelIsUp()
+    {
+        // The panel should keep teaching during a long peek, not freeze on the first slice.
+        var settings = new OverlaySettings();
+        Assert.IsTrue(settings.RotateSeconds > 0);
+        Assert.IsTrue(IdlePolicy.SlideDue(settings, visible: true, secondsSinceSlide: settings.RotateSeconds));
+    }
+
+    [TestMethod]
+    public void Tick_NeverSlidesOnTheOpeningTick_EvenWhenTheCallersClockIsStale()
+    {
+        // A reviewer's worry, and a fair one: the window could hand over a stale "time since
+        // slide" on the first tick of an appearance. `Decide` owns the fresh-appearance rule
+        // so the rows cannot change the instant the panel arrives, whatever the caller passes.
+        var settings = new OverlaySettings { RotateSeconds = 4 };
+
+        var tick = OverlayTicker.Decide(settings, hidden: false, idleSeconds: 0,
+            peekRemainingSeconds: 6, currentOpacity: 0, rotationSlot: 3,
+            peekCountedRotation: false, obstructed: false, secondsSinceSlide: 999);
+
+        Assert.IsTrue(tick.FreshAppearance);
+        Assert.IsFalse(tick.Slide, "the opening tick must not change the rows");
+        Assert.AreEqual(4, tick.RotationSlot, "the appearance advances the slice exactly once");
+    }
+
+    [TestMethod]
+    public void Tick_SlidesAfterTheInterval_WhileStayingVisible()
+    {
+        var settings = new OverlaySettings { RotateSeconds = 4 };
+
+        var tick = OverlayTicker.Decide(settings, hidden: false, idleSeconds: 0,
+            peekRemainingSeconds: 2, currentOpacity: 0.9, rotationSlot: 7,
+            peekCountedRotation: false, obstructed: false, secondsSinceSlide: 4);
+
+        Assert.IsFalse(tick.FreshAppearance);
+        Assert.IsTrue(tick.Slide);
+        Assert.AreEqual(8, tick.RotationSlot);
     }
 
     private static string FindRepoRoot()

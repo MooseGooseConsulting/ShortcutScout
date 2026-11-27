@@ -59,6 +59,9 @@ public partial class MainWindow : Window
     /// <summary>Counts actual relocations, so each dodge picks a different clear position.</summary>
     private int _placementCount;
 
+    /// <summary>When the visible rows last stepped to the next slice.</summary>
+    private TimeSpan _lastSlideAt = TimeSpan.Zero;
+
     private const double PointerMoveThresholdPx = 6;
 
     /// <summary>Which slice of the shortcut list is currently on screen.</summary>
@@ -153,10 +156,19 @@ public partial class MainWindow : Window
         // this returns is used by the rows below.
         var tickState = OverlayTicker.Decide(
             settings, _toggle.Hidden, idle, peekRemaining,
-            _currentOpacity, _rotationSlot, _peekCountedRotation, _obstructed);
+            _currentOpacity, _rotationSlot, _peekCountedRotation, _obstructed,
+            secondsSinceSlide: (_clock.Elapsed - _lastSlideAt).TotalSeconds);
 
         _rotationSlot = tickState.RotationSlot;
         _peekCountedRotation = tickState.PeekCountedRotation;
+
+        // The slide clock restarts on a fresh appearance (so rows never change the instant the
+        // panel arrives) and on every step; `Decide` owns both decisions so they stay testable.
+        if (tickState.FreshAppearance || tickState.Slide)
+        {
+            _lastSlideAt = _clock.Elapsed;
+            if (tickState.Slide && Tracing) Log($"rotate -> slot {_rotationSlot} (while visible)");
+        }
 
         // Rows after the rotation decision, so the first frame of an appearance already shows
         // the slice that decision selected.
@@ -345,6 +357,7 @@ public partial class MainWindow : Window
         // RePeekDue true forever after the first interval, so the panel re-appeared every
         // four seconds and re_peek_seconds meant nothing.
         _lastRevealAt = _clock.Elapsed;
+        _lastSlideAt = _clock.Elapsed; // new appearance: first slide is a full interval away
 
         _peekUntil = _clock.Elapsed + TimeSpan.FromSeconds(Math.Max(1, settings.PeekSeconds));
 

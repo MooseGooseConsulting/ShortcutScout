@@ -8,6 +8,7 @@
     "fade_in_ms": 200,
     "fade_out_ms": 180,
     "re_peek_seconds": 90,
+    "rotate_seconds": 4,
     "font_size": 13,
     "width": 460,
     "max_rows": 8,

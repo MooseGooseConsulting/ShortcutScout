@@ -53,6 +53,7 @@ public partial class SettingsWindow : Window
         Show(RowsSlider, S.MaxRows);
         Show(PeekSlider, S.PeekSeconds);
         Show(RePeekSlider, S.RePeekSeconds);
+        Show(RotateSlider, S.RotateSeconds);
         Show(IdleSlider, S.IdleThresholdSeconds);
         Show(OpacitySlider, S.ActiveOpacity);
 
@@ -79,6 +80,7 @@ public partial class SettingsWindow : Window
         RowsValue.Text = $"{RowsSlider.Value:0}";
         PeekValue.Text = $"{PeekSlider.Value:0}s";
         RePeekValue.Text = RePeekSlider.Value == 0 ? "off" : $"{RePeekSlider.Value:0}s";
+        RotateValue.Text = RotateSlider.Value == 0 ? "off" : $"{RotateSlider.Value:0}s";
         IdleValue.Text = $"{IdleSlider.Value:0}s";
         OpacityValue.Text = $"{OpacitySlider.Value:0.00}";
     }
@@ -91,6 +93,7 @@ public partial class SettingsWindow : Window
         RowsSlider.ValueChanged += (_, e) => Changed(() => S.MaxRows = (int)e.NewValue);
         PeekSlider.ValueChanged += (_, e) => Changed(() => S.PeekSeconds = e.NewValue);
         RePeekSlider.ValueChanged += (_, e) => Changed(() => S.RePeekSeconds = (int)e.NewValue);
+        RotateSlider.ValueChanged += (_, e) => Changed(() => S.RotateSeconds = (int)e.NewValue);
         IdleSlider.ValueChanged += (_, e) => Changed(() => S.IdleThresholdSeconds = (int)e.NewValue);
         OpacitySlider.ValueChanged += (_, e) => Changed(() => S.ActiveOpacity = e.NewValue);
 

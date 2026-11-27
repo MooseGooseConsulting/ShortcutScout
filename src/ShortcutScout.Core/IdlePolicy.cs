@@ -49,6 +49,12 @@ public sealed class OverlaySettings
     /// </summary>
     [JsonPropertyName("re_peek_seconds")] public int RePeekSeconds { get; set; } = 90;
 
+    /// <summary>
+    /// How often the visible rows step to the next slice, in seconds. This is what makes a
+    /// long peek keep teaching instead of freezing on eight rows. Set to 0 to hold still.
+    /// </summary>
+    [JsonPropertyName("rotate_seconds")] public int RotateSeconds { get; set; } = 4;
+
     /// <summary>Text size in device-independent pixels.</summary>
     [JsonPropertyName("font_size")] public double FontSize { get; set; } = 13;
 
@@ -128,6 +134,14 @@ public static class IdlePolicy
     public static bool RePeekDue(
         OverlaySettings settings, bool hidden, double secondsSinceReveal)
         => !hidden && settings.RePeekSeconds > 0 && secondsSinceReveal >= settings.RePeekSeconds;
+
+    /// <summary>
+    /// Whether the rows should step to the next slice while the panel is on screen.
+    /// Separate from <see cref="RePeekDue"/>: that decides whether the panel reappears,
+    /// this decides whether the list moves under a panel that is already up.
+    /// </summary>
+    public static bool SlideDue(OverlaySettings settings, bool visible, double secondsSinceSlide)
+        => visible && settings.RotateSeconds > 0 && secondsSinceSlide >= settings.RotateSeconds;
 
     /// <summary>Keys column width: explicit config wins, otherwise it scales with the font.</summary>
     public static double KeysColumnFor(OverlaySettings settings) =>
