@@ -133,7 +133,6 @@ public partial class MainWindow : Window
         }
 
         var settings = Settings;
-        UpdateContent(settings);
 
         var idle = ForceIdle ? int.MaxValue : CurrentIdleSeconds();
         var peekRemaining = (_peekUntil - _clock.Elapsed).TotalSeconds;
@@ -143,8 +142,12 @@ public partial class MainWindow : Window
 
         // Rotation counts *appearances*. A peek advances the slot when it starts (which is
         // the only event ambient mode ever gets, since the panel never becomes invisible),
-        // and an appearance not caused by a peek — an idle reveal — advances it here. The
-        // flag keeps one appearance from being counted twice.
+        // and an appearance not caused by a peek — an idle reveal, or an un-hide whose peek
+        // was refused by the anti-strobe floor — advances it here. The flag keeps one
+        // appearance from being counted twice.
+        //
+        // This runs *before* UpdateContent: building the rows first meant the opening frame
+        // of an idle reveal showed the previous slice and then swapped under the fade.
         if (target > 0.001 && _currentOpacity <= 0.001)
         {
             if (!_peekCountedRotation) _rotationSlot++;
@@ -155,6 +158,7 @@ public partial class MainWindow : Window
             _peekCountedRotation = false;
         }
 
+        UpdateContent(settings);
         ApplyOpacity(target, settings);
 
         if (_toggle.Hidden) return;

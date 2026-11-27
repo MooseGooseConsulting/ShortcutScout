@@ -46,7 +46,8 @@ public partial class SettingsWindow : Window
 
         // Config can hold values outside a slider's range (font_size 40, say). Assigning
         // those clamps the thumb but leaves the label reading the raw number, so the next
-        // drag would silently rewrite it. Clamp the model itself: what you see is what saves.
+        // drag would silently rewrite it. Clamp the slider position only; leave the model
+        // untouched, so nothing is saved unless the user actually moves something.
         Show(FontSlider, S.FontSize);
         Show(WidthSlider, S.Width);
         Show(RowsSlider, S.MaxRows);
