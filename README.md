@@ -178,8 +178,11 @@ dotnet test ShortcutScout.sln
 
 - `window_state.ps1` — lists every top-level window the process owns, including hidden ones (how "it isn't running" was diagnosed: the window existed, `visible=False`)
 - `capture_window.ps1` — DPI-aware capture of one window by title substring (`-BringToFront` to defeat occlusion)
+- `verify_placement.ps1` — sweeps the cursor across the screen and records where the panel lands after each move
 - `verify_runaway.ps1` — records the window rect, moves the real cursor into the panel, waits for ticks, re-reads the rect
 - `measure_idle.ps1` — injects input, captures the active state, waits out 30s, captures the idle state
+
+These three **move the real mouse pointer**, so each refuses to run without `-AllowCursorControl` (exit 2). Run them in a disposable VM — on a working desktop they take over the cursor. Normal verification does not need them: the geometry sweep is a unit test, and the trace logs cursor and placement every tick if you want to check the dodge against a cursor you moved yourself.
 - `measure_contrast.ps1` — samples luminance inside vs outside the panel
 - `capture_overlay.ps1` — DPI-aware crop of just the overlay
 - `capture_screen.ps1` — full desktop for diagnosing placement
