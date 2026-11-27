@@ -11,12 +11,13 @@ See `SPEC.md` for the 13-point requirements this was built against.
 | Behavior | Default |
 |---|---|
 | Toggle completely hidden | `Ctrl+Alt+S` (deliberately occasional — behavior is otherwise automatic) |
+| Tune it | `Ctrl+Alt+O` or tray → **Settings…** — size, rows, timings, mode |
 | Default visibility | **hidden** while you work — nothing sits in your field of view |
 | On switching apps | **peek**: full-strength, readable, for **6s**, then gone |
 | After **30s** with no input | `1.0`, neon at full strength, so it reads from across the room |
 | Look | bare neon-green text with a dark halo — no card, no title bar, no border |
 | Fade | in **200 ms**, out **180 ms** (leaving needs less attention than arriving) |
-| Shortcut rotation | one slot every **3 minutes** |
+| Shortcut rotation | advances on every appearance, so each time you see it the list is different |
 | Cursor avoidance | jumps to the docked position **furthest** from the cursor, keeping **72 px** clear |
 | Docking | 3×3 grid of edges/corners at a **20 px** inset, with **60 px** hysteresis so it never twitches |
 | Detection | foreground window → process name, exe, and window title |
@@ -78,6 +79,15 @@ content so letterform edges don't dissolve into text or imagery behind them:
 
 Sampling runs off the UI thread — grabbing a few hundred thousand pixels on the dispatcher
 made the overlay visibly stutter.
+
+## Settings
+
+The overlay is click-through and never takes focus, so it can't host its own controls.
+**Ctrl+Alt+O** (or the tray menu) opens a normal window with sliders for text size, width,
+rows shown, peek length, re-show interval, idle threshold, mode and ambient opacity. Changes
+apply as you drag and are debounced into `config/shortcuts.json`.
+
+Every knob, plus the ones worth adding, is listed in [`docs/CONFIG.md`](docs/CONFIG.md).
 
 ## Where it goes
 
@@ -158,7 +168,7 @@ CLI equivalent: `--cli list | show <app> | add <app> <keys> <action> | remove <a
 dotnet test ShortcutScout.sln
 ```
 
-**27 passing.** Covers foreground matching (including Devin/ChatGPT inside Chrome and the browser-hijack regression), priority ordering, config load/save/skip-malformed, the 30s idle boundary, toggle, rotation stability within a slot / change across slots, MCP round-trips through disk, and cursor-avoidance geometry — including a sweep of every 40px position across a 1920×1040 work area asserting the panel never lands under the cursor.
+**45 passing.** Covers foreground matching (including Devin/ChatGPT inside Chrome and the browser-hijack regression), priority ordering, config load/save/skip-malformed, the 30s idle boundary, toggle, rotation stability and per-appearance advancement, reveal triggers and their rate limit, the persisted overlay settings round-trip, MCP round-trips through disk, and cursor-avoidance geometry — including a sweep of every 40px position across a 1920×1040 work area asserting the panel never lands under the cursor.
 
 ## Verification tooling
 
@@ -176,7 +186,7 @@ Set `SHORTCUTSCOUT_FORCE_IDLE=1` to make the idle appearance reproducible — an
 
 ## What was actually measured
 
-- `dotnet build -c Release`: 0 errors, 0 warnings. `dotnet test`: **40/40**.
+- `dotnet build -c Release`: 0 errors, 0 warnings. `dotnet test`: **45/45**.
 - Window styles on the live process: `0x080800A8` — layered, transparent, topmost, no-activate, tool-window.
 - Run-away: with the panel docked right at `(960,646)`, moving the cursor to the right side sent it to `(20,20)` — it crosses the screen rather than shuffling along one edge.
 - Idle: trace shows `idle=31s opacity=1.00` and `idle=0s opacity=0.92`, i.e. the 30s threshold drives it.

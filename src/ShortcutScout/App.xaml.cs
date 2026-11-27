@@ -11,6 +11,7 @@ namespace ShortcutScout;
 public partial class App : System.Windows.Application
 {
     private MainWindow? _win;
+    private SettingsWindow? _settings;
     private readonly ConfigStore _store = new(FindConfig());
     private readonly ToggleState _toggle = new();
     private readonly Rotation _rotation = new();
@@ -40,8 +41,11 @@ public partial class App : System.Windows.Application
         _win.EnsureHandleReady();
         _hwnd = _win.OwnHandle;
         Win32.MakeClickThroughAlwaysOnTop(_win);
-        System.Windows.Interop.HwndSource.FromHwnd(_hwnd)?.AddHook(HotkeyHook);
-        Win32.RegisterHotKey(_hwnd, Win32.HOTKEY_ID, Win32.MOD_CTRL | Win32.MOD_ALT | Win32.MOD_NOREPEAT, Win32.VK_S);
+        var source = System.Windows.Interop.HwndSource.FromHwnd(_hwnd);
+        source?.AddHook(HotkeyHook);
+        var okToggle = Win32.RegisterHotKey(_hwnd, Win32.HOTKEY_ID, Win32.MOD_CTRL | Win32.MOD_ALT | Win32.MOD_NOREPEAT, Win32.VK_S);
+        var okSettings = Win32.RegisterHotKey(_hwnd, Win32.HOTKEY_SETTINGS_ID, Win32.MOD_CTRL | Win32.MOD_ALT | Win32.MOD_NOREPEAT, Win32.VK_O);
+        Log($"hwnd=0x{_hwnd.ToInt64():X} source={(source != null)} toggleHotkey={okToggle} settingsHotkey={okSettings}");
 
         SetupTray();
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -52,12 +56,56 @@ public partial class App : System.Windows.Application
 
     private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg == Win32.WM_HOTKEY && wParam.ToInt32() == Win32.HOTKEY_ID)
+        if (msg == Win32.WM_HOTKEY)
         {
-            _toggle.Toggle();
-            handled = true;
+            Log($"hotkey id={wParam.ToInt32()}");
+            switch (wParam.ToInt32())
+            {
+                case Win32.HOTKEY_ID:
+                    _toggle.Toggle();
+                    handled = true;
+                    break;
+                case Win32.HOTKEY_SETTINGS_ID:
+                    ShowSettings();
+                    handled = true;
+                    break;
+            }
         }
         return IntPtr.Zero;
+    }
+
+    /// <summary>
+    /// The overlay is click-through and never activates, so this window is the only
+    /// way to tune it with a mouse. It's a normal window: activatable and hit-testable.
+    /// </summary>
+    private void ShowSettings()
+    {
+        Log("settings requested");
+        if (_settings is { IsLoaded: true })
+        {
+            _settings.Activate();
+            return;
+        }
+
+        _settings = new SettingsWindow(_store, () => _win?.ApplySettings());
+        _settings.Closed += (_, __) => _settings = null;
+        _settings.Show();
+        _settings.Activate();
+    }
+
+    private static readonly bool Tracing =
+        Environment.GetEnvironmentVariable("SHORTCUTSCOUT_TRACE") == "1";
+
+    private static void Log(string message)
+    {
+        if (!Tracing) return;
+        try
+        {
+            File.AppendAllText(
+                Path.Combine(Path.GetTempPath(), "shortcutscout-trace.log"),
+                $"{DateTime.Now:HH:mm:ss.fff} app: {message}{Environment.NewLine}");
+        }
+        catch { /* tracing must never break the app */ }
     }
 
     private void SetupTray()
@@ -69,23 +117,31 @@ public partial class App : System.Windows.Application
             Visible = true
         };
         var menu = new WinForms.ContextMenuStrip();
+        var settingsItem = new WinForms.ToolStripMenuItem("Settings… (Ctrl+Alt+O)");
+        settingsItem.Click += (_, __) => ShowSettings();
         var toggleItem = new WinForms.ToolStripMenuItem("Hide / Show (Ctrl+Alt+S)");
         toggleItem.Click += (_, __) => _toggle.Toggle();
         var reloadItem = new WinForms.ToolStripMenuItem("Reload config");
-        reloadItem.Click += (_, __) => _store.Reload();
+        reloadItem.Click += (_, __) => { _store.Reload(); _win?.ApplySettings(); };
         var exitItem = new WinForms.ToolStripMenuItem("Exit");
         exitItem.Click += (_, __) => Shutdown();
+        menu.Items.Add(settingsItem);
         menu.Items.Add(toggleItem);
         menu.Items.Add(reloadItem);
+        menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add(exitItem);
         _tray.ContextMenuStrip = menu;
-        _tray.DoubleClick += (_, __) => _toggle.Toggle();
+        _tray.DoubleClick += (_, __) => ShowSettings();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         _timer?.Stop();
-        if (_hwnd != IntPtr.Zero) Win32.UnregisterHotKey(_hwnd, Win32.HOTKEY_ID);
+        if (_hwnd != IntPtr.Zero)
+        {
+            Win32.UnregisterHotKey(_hwnd, Win32.HOTKEY_ID);
+            Win32.UnregisterHotKey(_hwnd, Win32.HOTKEY_SETTINGS_ID);
+        }
         if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }
         base.OnExit(e);
     }

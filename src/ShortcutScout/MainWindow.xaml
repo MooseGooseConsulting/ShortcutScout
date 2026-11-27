@@ -27,17 +27,17 @@
           <Grid Margin="0,2">
             <Grid.ColumnDefinitions>
               <!-- Fixed, not Auto: with Auto, long keys grew past the column and
-                   collided with the action text. -->
-              <ColumnDefinition Width="176"/>
+                   collided with the action text. Width is set from config in code. -->
+              <ColumnDefinition Width="{Binding KeyWidth}"/>
               <ColumnDefinition Width="*"/>
             </Grid.ColumnDefinitions>
             <TextBlock Grid.Column="0" Text="{Binding Keys}"
                        Foreground="{DynamicResource KeyBrush}" FontFamily="Consolas"
-                       FontSize="13" FontWeight="Bold" Margin="0,0,14,0"
+                       FontWeight="Bold" Margin="0,0,14,0"
                        TextTrimming="CharacterEllipsis"/>
             <TextBlock Grid.Column="1" Text="{Binding Action}"
                        Foreground="{DynamicResource ActionBrush}" FontFamily="Consolas"
-                       FontSize="13" TextWrapping="Wrap"/>
+                       TextWrapping="Wrap"/>
           </Grid>
         </DataTemplate>
       </ItemsControl.ItemTemplate>

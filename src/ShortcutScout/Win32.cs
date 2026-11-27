@@ -15,8 +15,10 @@ public static class Win32
     public const uint SWP_NOMOVE = 0x0002, SWP_NOSIZE = 0x0001, SWP_NOACTIVATE = 0x0010, SWP_SHOWWINDOW = 0x0040;
     public const int WM_HOTKEY = 0x0312;
     public const int HOTKEY_ID = 1;
+    public const int HOTKEY_SETTINGS_ID = 2;
     public const uint MOD_ALT = 0x0001, MOD_CTRL = 0x0002, MOD_NOREPEAT = 0x4000;
     public const uint VK_S = 0x53;
+    public const uint VK_O = 0x4F;
 
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]

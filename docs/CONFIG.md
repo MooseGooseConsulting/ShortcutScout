@@ -1,0 +1,96 @@
+# Configuration
+
+Everything is JSON on disk — no database, no registry. Two places:
+
+```
+config/
+  shortcuts.json      overlay settings + the fallback "global" app
+  apps/<app>.json     one file per app (devin, chatgpt, chrome, claudecode, zellij)
+```
+
+Edit by hand, through the settings window (**Ctrl+Alt+O** or the tray menu), or with an
+agent over MCP (`ShortcutScout.exe --mcp`). All three write the same files.
+
+## Overlay settings (`config/shortcuts.json` → `overlay`)
+
+| Key | Default | What it does |
+|---|---|---|
+| `mode` | `"peek"` | `peek` = hidden while you work; `ambient` = always visible at `active_opacity` |
+| `idle_threshold_seconds` | `30` | Seconds of no input before the panel comes up and stays up |
+| `peek_seconds` | `6` | How long one appearance lasts |
+| `re_peek_seconds` | `90` | Show again unprompted after this long with nothing revealed. `0` disables it |
+| `active_opacity` | `0.9` | Ambient-mode resting opacity (never allowed below the readable floor of `0.54`) |
+| `idle_opacity` | `1.0` | Opacity used for idle reveals and peeks |
+| `fade_in_ms` | `200` | Fade-in duration |
+| `fade_out_ms` | `180` | Fade-out duration (leaving needs less attention than arriving) |
+| `font_size` | `13` | Text size in DIPs |
+| `width` | `460` | Overlay width in DIPs |
+| `max_rows` | `8` | How many shortcut rows to show at once |
+| `keys_column_width` | `0` | Keys column width; `0` derives it from `font_size` (13.5 × font) |
+
+## Per-app settings (`config/apps/*.json`)
+
+| Key | Meaning |
+|---|---|
+| `id` | Stable identifier, also the file name |
+| `name` | Display name |
+| `priority` | Higher wins when several apps match. Title-matched web apps use `1000`, the browser `10`, `global` `0` |
+| `process_names` | Process name matches (no `.exe`). **Empty for browser-hosted apps** so they can't hijack every browser window |
+| `exe_names` | Executable matches, e.g. `ChatGPT.exe` |
+| `title_contains` | Case-insensitive window-title substrings. This is how Devin/ChatGPT inside Chrome are detected |
+| `shortcuts[]` | `{ keys, action, discovery, category }` — `discovery: true` marks shortcuts worth surfacing to someone who doesn't know them |
+
+## Reveal rules (what makes the panel appear)
+
+1. **A window comes to the front** — a different foreground window, whatever app it belongs
+   to. Rate-limited to once every 4 seconds so alt-tabbing doesn't strobe.
+2. **Nothing has been shown for `re_peek_seconds`** — the periodic reveal. Without this the
+   panel can stay hidden for an entire session during steady work.
+3. **You step away for `idle_threshold_seconds`** — stays up until you come back.
+4. **`Ctrl+Alt+S`** hides everything until pressed again.
+
+Rotation advances **once per appearance**, while the panel is off screen — so every time you
+see it, it's a different slice of the list. It does not tick on a wall clock: a 3-minute timer
+rotated while nobody was looking, which is how the list appeared never to change.
+
+## Things worth being able to vary (not all implemented)
+
+Grouped by how much they'd change daily use. Implemented ones are marked.
+
+**Text and shape**
+
+- `font_size`, `width`, `max_rows`, `keys_column_width` — **implemented**, also in the settings window
+- `font_family` — currently Consolas, hard-coded in the XAML
+- `line_spacing` / row margin — fixed at `0,2` per row
+- `key_color` / `action_color` — fixed neon `#39FF14` / `#8CFF7A`
+- `halo_blur` / `halo_opacity` — adapted from the backdrop (4.0–6.5), not user-tunable
+- `align_keys` — the keys column is fixed width so actions line up; some people prefer ragged
+- `show_categories` — the field exists in the data model but nothing renders it
+
+**Placement**
+
+- `dock` — pin to one of 9 slots instead of always jumping to the far corner
+- `placement_strategy` — `furthest` (current), `nearest`, `fixed`
+- `margin` / `inset` — 72 px clearance and 20 px screen inset, currently constants
+- `multi_monitor` — currently clamps to the primary monitor's work area only
+- `keep_position` — remember the last position across restarts (currently resets to top-left)
+
+**Behavior**
+
+- `mode`, `peek_seconds`, `re_peek_seconds`, `idle_threshold_seconds`, `active_opacity`, `fade_*` — **implemented**
+- `rotation_every_reveals` — rotate every N appearances instead of every one (core support exists: `Rotation.RevealSlot(reveals, everyReveals)`, not yet read from config)
+- `hide_when_fullscreen` — don't overlay games/videos
+- `hide_when_battery` — be polite on battery
+- `pause_apps` — per-app opt-out list
+- `discovery_highlight` — how a not-yet-seen shortcut is marked (`NEW` badge, dimmer seen rows, a `+` prefix…)
+- `min_peek_gap_seconds` — the 4-second anti-strobe floor when switching windows
+- `start_with_windows` — not implemented; a shortcut in `shell:startup` is the workaround
+
+## Why some defaults are what they are
+
+- `idle_threshold_seconds: 30` — from the original requirement ("numbers become more visible
+  after I leave the computer alone for 30 seconds").
+- `active_opacity: 0.9` — the value PowerToys ships for its shortcut guide, and comfortably
+  above the ~0.54 scrim floor needed for 4.5:1 body text over white.
+- `re_peek_seconds: 90` — long enough not to nag, short enough that a session actually shows
+  you something you didn't know. Set it to `0` if you only want reveals on window switches.
