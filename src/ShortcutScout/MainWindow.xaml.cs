@@ -47,6 +47,15 @@ public partial class MainWindow : Window
 
     private long _lastWindowKey;
 
+    // Pointer stillness, tracked independently of GetLastInputInfo (see CurrentIdleSeconds).
+    private double _lastPointerX = double.NaN, _lastPointerY = double.NaN;
+    private TimeSpan _pointerMovedAt = TimeSpan.Zero;
+
+    /// <summary>Counts actual relocations, so each dodge picks a different clear position.</summary>
+    private int _placementCount;
+
+    private const double PointerMoveThresholdPx = 6;
+
     /// <summary>Which slice of the shortcut list is currently on screen.</summary>
     private long _rotationSlot;
 
@@ -126,7 +135,7 @@ public partial class MainWindow : Window
         var settings = Settings;
         UpdateContent(settings);
 
-        var idle = ForceIdle ? int.MaxValue : Win32.IdleSeconds();
+        var idle = ForceIdle ? int.MaxValue : CurrentIdleSeconds();
         var peekRemaining = (_peekUntil - _clock.Elapsed).TotalSeconds;
 
         var target = IdlePolicy.OpacityFor(settings, _toggle.Hidden, idle, peekRemaining);
@@ -156,6 +165,32 @@ public partial class MainWindow : Window
         RunAwayFromCursor();
 
         if (target <= 0.001) BeginBackdropSample();
+    }
+
+    /// <summary>
+    /// How long the user has been away.
+    ///
+    /// `GetLastInputInfo` alone is not reliable here: measured on this machine it never
+    /// exceeded 2s across 40s of a still, untouched desktop, so the 30s reveal could never
+    /// fire. Something resets the OS input timer without moving the cursor. Pointer stillness
+    /// gives a second signal, and the larger of the two wins.
+    /// </summary>
+    private int CurrentIdleSeconds()
+    {
+        var (px, py) = Win32.CursorPos();
+        var moved = double.IsNaN(_lastPointerX)
+            || Math.Abs(px - _lastPointerX) > PointerMoveThresholdPx
+            || Math.Abs(py - _lastPointerY) > PointerMoveThresholdPx;
+
+        if (moved)
+        {
+            _lastPointerX = px;
+            _lastPointerY = py;
+            _pointerMovedAt = _clock.Elapsed;
+        }
+
+        var still = (_clock.Elapsed - _pointerMovedAt).TotalSeconds;
+        return IdlePolicy.CombineIdle(Win32.IdleSeconds(), still);
     }
 
     /// <summary>
@@ -353,14 +388,17 @@ public partial class MainWindow : Window
         var placement = OverlayGeometry.Place(
             new CoreRect(Left, Top, Width, height),
             cursor.X, cursor.Y,
-            new CoreRect(work.X, work.Y, work.Width, work.Height));
+            new CoreRect(work.X, work.Y, work.Width, work.Height),
+            variety: _placementCount);
 
         _obstructed = !placement.Escaped;
 
-        if (placement.Escaped)
+        if (placement.Escaped &&
+            (Math.Abs(placement.X - Left) > 0.5 || Math.Abs(placement.Y - Top) > 0.5))
         {
-            if (Math.Abs(placement.X - Left) > 0.5) Left = placement.X;
-            if (Math.Abs(placement.Y - Top) > 0.5) Top = placement.Y;
+            Left = placement.X;
+            Top = placement.Y;
+            _placementCount++; // next dodge steps to a different clear position
         }
 
         if (Tracing)

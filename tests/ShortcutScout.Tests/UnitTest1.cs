@@ -616,6 +616,38 @@ public class Tests
     }
 
     [TestMethod]
+    public void Idle_FallsBackToPointerStillness_WhenOsIdleNeverGrows()
+    {
+        // Measured on this machine: GetLastInputInfo sat at 0-2s for 40s on an untouched
+        // desktop, so the 30s reveal could never fire. Pointer stillness has to rescue it.
+        Assert.AreEqual(31, IdlePolicy.CombineIdle(osIdleSeconds: 0, pointerStillSeconds: 31.4));
+        Assert.AreEqual(40, IdlePolicy.CombineIdle(osIdleSeconds: 40, pointerStillSeconds: 3));
+        Assert.AreEqual(2, IdlePolicy.CombineIdle(osIdleSeconds: 2, pointerStillSeconds: 2));
+        Assert.AreEqual(0, IdlePolicy.CombineIdle(0, double.NaN));
+        Assert.AreEqual(0, IdlePolicy.CombineIdle(0, -5));
+    }
+
+    [TestMethod]
+    public void Place_CyclesThroughClearPositions_InsteadOfAlwaysTakingTheFarCorner()
+    {
+        // Always picking the single furthest slot parked the panel in the same two corners.
+        var work = new Rect(0, 0, 1920, 1040);
+        var overlay = new Rect(20, 20, 460, 200);
+
+        var seen = new HashSet<(double, double)>();
+        for (var variety = 0; variety < 3; variety++)
+        {
+            var p = OverlayGeometry.Place(overlay, 200, 160, work, variety: variety);
+            Assert.IsTrue(p.Escaped);
+            Assert.IsFalse(new Rect(p.X, p.Y, 460, 200).Overlaps(200, 160, 72),
+                $"variety {variety} still covers the cursor at ({p.X},{p.Y})");
+            seen.Add((p.X, p.Y));
+        }
+
+        Assert.AreEqual(3, seen.Count, "the first three dodges should use three different positions");
+    }
+
+    [TestMethod]
     public void RePeek_ZeroDisablesPeriodicReveals()
     {
         var settings = new OverlaySettings { RePeekSeconds = 0 };

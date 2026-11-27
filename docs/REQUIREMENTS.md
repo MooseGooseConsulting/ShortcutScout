@@ -154,6 +154,12 @@ The re-peek fires at the configured interval, not every 4 s — an earlier versi
 ## 10. More visible after 30 s idle — Met
 
 `IdlePolicy.OpacityFor`: `idle >= idle_threshold_seconds (30)` → `idle_opacity` (`1.0`).
+
+**Idleness is measured twice.** `GetLastInputInfo` alone never fired on the target machine — it
+sat at 0-2 s for 40 s of an untouched desktop, because something resets the OS input timer
+without moving the cursor. `IdlePolicy.CombineIdle` takes the larger of OS input-idle and
+measured pointer stillness, so the 30 s reveal works either way
+(`Idle_FallsBackToPointerStillness_WhenOsIdleNeverGrows`).
 `Idle_ThresholdIsExclusiveAt30Seconds` pins the boundary (29 s → hidden, 30 s → full).
 
 Trace from the running app: `idle=31s opacity=1.00`, then `idle=0s opacity=0.92` on return.

@@ -81,6 +81,21 @@ public static class IdlePolicy
     public static bool IsIdle(int idleSeconds, int threshold) => idleSeconds >= threshold;
 
     /// <summary>
+    /// Combine OS input-idle with measured pointer stillness.
+    ///
+    /// On some machines <c>GetLastInputInfo</c> is reset continuously by something that never
+    /// moves the cursor — a jittery pointing device, a remote/KVM helper, an accessibility
+    /// tool — so input-idle sits at 0 forever and the 30s reveal never fires at all. Pointer
+    /// stillness is measured here, and whichever signal is larger wins.
+    /// </summary>
+    public static int CombineIdle(int osIdleSeconds, double pointerStillSeconds)
+    {
+        if (double.IsNaN(pointerStillSeconds) || pointerStillSeconds < 0) pointerStillSeconds = 0;
+        var still = (int)Math.Min(int.MaxValue, pointerStillSeconds);
+        return Math.Max(osIdleSeconds, still);
+    }
+
+    /// <summary>
     /// Target opacity for the current moment. Deliberately never returns a value
     /// between 0 and <see cref="ReadableFloor"/>: the panel is either out of the way
     /// or legible, never a half-visible smudge.

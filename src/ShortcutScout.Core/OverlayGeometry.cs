@@ -45,10 +45,16 @@ public static class OverlayGeometry
     /// in — it hops along one edge forever instead of using the screen — and leaves it
     /// permanently in the way of whatever is being read on that side.
     /// </summary>
+    /// <param name="variety">
+    /// Rotates the choice among the positions that clear the cursor. Always taking the single
+    /// furthest slot parks the panel in the same two corners forever (mirroring the pointer),
+    /// which reads as "it's always in the corner"; stepping through the clear candidates makes
+    /// it use the whole screen instead.
+    /// </param>
     public static Placement Place(
         Rect overlay, double cx, double cy, Rect work,
         double margin = DefaultMargin, double inset = DefaultInset,
-        double hysteresis = DefaultHysteresis)
+        double hysteresis = DefaultHysteresis, int variety = 0)
     {
         var w = overlay.W;
         var h = overlay.H;
@@ -73,9 +79,10 @@ public static class OverlayGeometry
         var xs = new[] { loX, (loX + hiX) / 2, hiX };
         var ys = new[] { loY, (loY + hiY) / 2, hiY };
 
-        (double X, double Y)? best = null;
-        var bestClearance = double.MinValue;
-        var bestDistance = double.MinValue;
+        // Rank every clear position by how far it is from the cursor (centre distance breaks
+        // ties), then step through that ranking by `variety` so repeated dodges don't all land
+        // in the same corner.
+        var candidates = new List<(double X, double Y, double Clearance, double Distance)>();
 
         foreach (var x in xs)
         {
@@ -84,21 +91,23 @@ public static class OverlayGeometry
                 var candidate = new Rect(x, y, w, h);
                 if (candidate.Overlaps(cx, cy, margin)) continue;
 
-                var clearance = candidate.Clearance(cx, cy);
-                var distance = Distance(x + w / 2, y + h / 2, cx, cy);
-
-                // Furthest wins; distance from the cursor centre breaks ties.
-                if (clearance > bestClearance + 0.001 ||
-                    (Math.Abs(clearance - bestClearance) <= 0.001 && distance > bestDistance))
-                {
-                    bestClearance = clearance;
-                    bestDistance = distance;
-                    best = (x, y);
-                }
+                candidates.Add((x, y, candidate.Clearance(cx, cy), Distance(x + w / 2, y + h / 2, cx, cy)));
             }
         }
 
-        if (best is { } chosen) return new Placement(chosen.X, chosen.Y, true);
+        if (candidates.Count > 0)
+        {
+            candidates.Sort((a, b) =>
+            {
+                var byClearance = b.Clearance.CompareTo(a.Clearance);
+                return Math.Abs(byClearance) > 0 ? byClearance : b.Distance.CompareTo(a.Distance);
+            });
+
+            // Only the top candidates are worth cycling through: the rest are barely clear.
+            var pool = Math.Min(3, candidates.Count);
+            var pick = candidates[((variety % pool) + pool) % pool];
+            return new Placement(pick.X, pick.Y, true);
+        }
 
         // Defensive: a very large panel on a small work area may find no docked
         // position that clears the cursor. Fall back to a finer search before
