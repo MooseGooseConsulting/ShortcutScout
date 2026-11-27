@@ -37,7 +37,10 @@ public partial class MainWindow : Window
     private long _lastTickAt;
 
     /// <summary>When the current peek ends.</summary>
-    private TimeSpan _peekUntil = TimeSpan.MinValue;
+    // "No peek scheduled". Zero is a past instant, so `peekRemaining` comes out negative
+    // without any special-casing. Do not use TimeSpan.MinValue here: subtracting the
+    // elapsed clock from it overflows on the very first tick and kills the app at startup.
+    private TimeSpan _peekUntil = TimeSpan.Zero;
 
     // Long enough ago that the first peek is never rate-limited (MinValue would overflow
     // when the gap is subtracted).
@@ -135,7 +138,9 @@ public partial class MainWindow : Window
         var settings = Settings;
 
         var idle = ForceIdle ? int.MaxValue : CurrentIdleSeconds();
-        var peekRemaining = (_peekUntil - _clock.Elapsed).TotalSeconds;
+        // Compare instead of subtracting straight away: with a TimeSpan.MinValue sentinel the
+        // subtraction overflows (and threw at startup). Both operands are non-negative here.
+        var peekRemaining = _peekUntil <= _clock.Elapsed ? 0 : (_peekUntil - _clock.Elapsed).TotalSeconds;
 
         var target = IdlePolicy.OpacityFor(settings, _toggle.Hidden, idle, peekRemaining);
         if (_obstructed && !_toggle.Hidden) target = Math.Min(target, 0.14);
