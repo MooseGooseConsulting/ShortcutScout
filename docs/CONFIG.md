@@ -11,6 +11,12 @@ config/
 Edit by hand, through the settings window (**Ctrl+Alt+O** or the tray menu), or with an
 agent over MCP (`ShortcutScout.exe --mcp`). All three write the same files.
 
+**Edits apply by themselves.** The running overlay watches `config/` and reloads about half a
+second after the files go quiet — a hand edit, a `--cli add`, or an agent's `add_shortcut`
+shows up without touching the tray. Reloads wait while the settings window is open (it
+holds unsaved changes of its own) and run when it closes. Renaming or deleting `apps/` counts. *Reload config* in the tray still forces it, and is the
+fallback if the folder can't be watched (the event log says so).
+
 **Where the folder is found.** `config/` beside the exe, or the nearest one walking up from
 it (which is how a dev build under `src/ShortcutScout/bin/…` reaches the repo's `config/`),
 then the same search from the working directory. A folder only counts if it holds

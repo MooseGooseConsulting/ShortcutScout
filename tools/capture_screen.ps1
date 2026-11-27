@@ -8,7 +8,8 @@ $bmp = New-Object System.Drawing.Bitmap($b.Width, $b.Height)
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($b.Left, $b.Top, 0, 0, $bmp.Size)
 
-$out = Join-Path (Get-Location) $Out
+# Absolute paths pass through; Join-Path would glue the working directory onto the front.
+$out = if ([IO.Path]::IsPathRooted($Out)) { $Out } else { Join-Path (Get-Location) $Out }
 New-Item -ItemType Directory -Force -Path (Split-Path $out) | Out-Null
 
 # Downscale so the whole desktop stays viewable and cheap to inspect.

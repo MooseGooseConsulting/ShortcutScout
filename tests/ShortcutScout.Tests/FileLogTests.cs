@@ -112,4 +112,30 @@ public class FileLogTests
         Assert.AreEqual(200, lines.Length);
         Assert.AreEqual(200, lines.Select(l => l.Split("entry-")[1]).Distinct().Count());
     }
+
+    [TestMethod]
+    public void TwoLogsOnOneFile_AsTheOverlayAndAnMcpProcessAre_BothKeepTheirLines()
+    {
+        // Separate FileLog instances share no lock, like separate processes.
+        var path = Path.Combine(_dir, "app.log");
+        var overlay = new FileLog(path, maxBytes: 10_000_000, now: () => Fixed);
+        var mcp = new FileLog(path, maxBytes: 10_000_000, now: () => Fixed);
+
+        Directory.CreateDirectory(_dir);
+
+        // Another process holding the file open for append must not cost us the line.
+        using (new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+        {
+            overlay.Info("from-overlay");
+            mcp.Info("from-mcp");
+        }
+
+        // And the two racing each other must not write over one another's entries.
+        Parallel.For(0, 400, i => (i % 2 == 0 ? overlay : mcp).Info($"entry-{i:000}"));
+
+        var lines = File.ReadAllLines(path);
+        Assert.AreEqual(402, lines.Length);
+        Assert.IsTrue(lines.Any(l => l.EndsWith("from-overlay")) && lines.Any(l => l.EndsWith("from-mcp")));
+        Assert.AreEqual(400, lines.Where(l => l.Contains("entry-")).Select(l => l.Split("entry-")[1]).Distinct().Count());
+    }
 }

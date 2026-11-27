@@ -20,6 +20,10 @@ public partial class App : System.Windows.Application
     private IntPtr _hwnd;
     private long _tick;
     private Mutex? _singleInstance;
+    private FileSystemWatcher? _configWatcher;
+    private DispatcherTimer? _reloadDebounce;
+    private bool _reloadDeferred;
+    private string _reloadVia = "file change";
     private readonly ErrorBudget _errorBudget = new();
     private readonly Stopwatch _uptime = Stopwatch.StartNew();
 
@@ -36,6 +40,11 @@ public partial class App : System.Windows.Application
     {
         base.OnStartup(e);
         InstallCrashLogging();
+
+        // Every writer goes through the store, in whichever process it runs: the settings
+        // window here, or an agent/CLI in a separate `--mcp` / `--cli` process.
+        var writer = e.Args.Contains("--mcp") ? "mcp" : e.Args.Contains("--cli") ? "cli" : "settings";
+        _store.Written += file => AppLog.Info($"config written by {writer}: {file}");
 
         if (e.Args.Contains("--mcp")) { RunMcp(); Shutdown(); return; }
         if (e.Args.Contains("--sample")) { RunSample(e.Args); Shutdown(); return; }
@@ -71,6 +80,7 @@ public partial class App : System.Windows.Application
 
         SetupTray();
         ReportLoadErrors();
+        WatchConfig();
 
         // RegisterHotKey fails when another program owns the combination. Nothing else in the
         // app would ever tell you; the tray menu still works, so say so rather than exit.
@@ -80,7 +90,8 @@ public partial class App : System.Windows.Application
                 .Where(k => k != null));
             AppLog.Warn($"could not register {taken}: already in use by another program");
             _tray?.ShowBalloonTip(8000, "ShortcutScout: hotkey unavailable",
-                $"{taken} is taken by another program. Use this tray icon instead.", WinForms.ToolTipIcon.Warning);
+                $"Another program already uses {taken}. The tray icon's menu does the same things.",
+                WinForms.ToolTipIcon.Warning);
         }
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _timer.Tick += (_, __) =>
@@ -129,7 +140,12 @@ public partial class App : System.Windows.Application
         }
 
         _settings = new SettingsWindow(_store, () => _win?.ApplySettings());
-        _settings.Closed += (_, __) => _settings = null;
+        _settings.Closed += (_, __) =>
+        {
+            _settings = null;
+            // Watching was paused, not switched off: replay what arrived meanwhile.
+            if (_reloadDeferred) { _reloadDeferred = false; _reloadDebounce?.Start(); }
+        };
         _settings.Show();
         _settings.Activate();
     }
@@ -211,13 +227,7 @@ public partial class App : System.Windows.Application
         var toggleItem = new WinForms.ToolStripMenuItem("Hide / Show (Ctrl+Alt+S)");
         toggleItem.Click += (_, __) => ToggleHidden("tray");
         var reloadItem = new WinForms.ToolStripMenuItem("Reload config");
-        reloadItem.Click += (_, __) =>
-        {
-            _store.Reload();
-            _win?.ApplySettings();
-            AppLog.Info($"config reloaded: apps={_store.Config.Apps.Count} errors={_store.LoadErrors.Count}");
-            ReportLoadErrors();
-        };
+        reloadItem.Click += (_, __) => ReloadConfig("tray");
         var configItem = new WinForms.ToolStripMenuItem("Open config folder");
         configItem.Click += (_, __) => OpenFolder(_store.ConfigDir);
         var logItem = new WinForms.ToolStripMenuItem("Open log folder");
@@ -239,19 +249,114 @@ public partial class App : System.Windows.Application
     /// A config file that failed to parse is skipped, not fatal — but skipping it silently
     /// looks exactly like "my edit did nothing", so say which file and why.
     /// </summary>
-    private void ReportLoadErrors()
+    /// <param name="asked">
+    /// True when the user explicitly asked for a reload: answer every time. Otherwise only
+    /// speak up when the set of problems CHANGES — with the folder watched, a file that stays
+    /// broken would otherwise raise the same balloon on every save of any other file.
+    /// </param>
+    private void ReportLoadErrors(bool asked = false)
     {
         var errors = _store.LoadErrors;
+        var summary = string.Join(Environment.NewLine, errors);
+        var changed = summary != _lastReportedErrors;
+        _lastReportedErrors = summary;
+        if (!changed && !asked) return;
+
         foreach (var error in errors) AppLog.Warn("config: " + error);
-        if (errors.Count == 0 || _tray == null) return;
+        if (errors.Count == 0)
+        {
+            if (changed) AppLog.Info("config: all files load cleanly again");
+            return;
+        }
 
         var text = string.Join(Environment.NewLine, errors.Take(3));
         if (text.Length > 240) text = text[..240] + "…";
-        _tray.ShowBalloonTip(8000, "ShortcutScout: config problem", text, WinForms.ToolTipIcon.Warning);
+        _tray?.ShowBalloonTip(8000, "ShortcutScout: config problem", text, WinForms.ToolTipIcon.Warning);
+    }
+
+    private string _lastReportedErrors = "";
+
+    private void ReloadConfig(string via)
+    {
+        _store.Reload();
+        _win?.ApplySettings();
+        AppLog.Info($"config reloaded ({via}): apps={_store.Config.Apps.Count} " +
+                    $"shortcuts={_store.Config.Apps.Sum(a => a.Shortcuts.Count)} errors={_store.LoadErrors.Count}");
+        ReportLoadErrors(asked: via == "tray");
+    }
+
+    /// <summary>
+    /// Pick up config edits without a trip to the tray menu.
+    ///
+    /// `--mcp` and `--cli` are separate processes: they write the files, and until now the
+    /// running overlay never noticed, so an agent's add_shortcut looked like it did nothing.
+    /// One save produces several file events (and a write-then-rename produces more), so the
+    /// reload waits for them to go quiet.
+    /// </summary>
+    private void WatchConfig()
+    {
+        try
+        {
+            Directory.CreateDirectory(_store.ConfigDir);
+
+            _reloadDebounce = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(400) };
+            _reloadDebounce.Tick += (_, __) =>
+            {
+                _reloadDebounce!.Stop();
+
+                // The settings window is an editor with unsaved in-memory changes; reloading
+                // underneath it would overwrite the value being dragged. Its own saves are
+                // what we would be reacting to anyway.
+                // Deferred, not dropped: the edit is replayed when the window closes.
+                if (_settings != null) { _reloadDeferred = true; return; }
+                var via = _reloadVia; _reloadVia = "file change";
+                ReloadConfig(via);
+            };
+
+            // No name filter: it would also hide the `apps` folder itself being renamed or
+            // deleted, which changes what loads without touching a single .json file.
+            _configWatcher = new FileSystemWatcher(_store.ConfigDir)
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName
+                             | NotifyFilters.DirectoryName | NotifyFilters.Size,
+            };
+
+            static bool Relevant(string? path) =>
+                path != null && (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                                 || Path.GetExtension(path).Length == 0); // a folder, e.g. apps
+
+            // Raised on a thread-pool thread: only restart the timer, and do it on the UI thread.
+            void Touched(object? sender, FileSystemEventArgs args)
+            {
+                if (!Relevant(args.FullPath) && !(args is RenamedEventArgs r && Relevant(r.OldFullPath))) return;
+                Dispatcher.BeginInvoke(() => { _reloadDebounce.Stop(); _reloadDebounce.Start(); });
+            }
+
+            _configWatcher.Changed += Touched;
+            _configWatcher.Created += Touched;
+            _configWatcher.Deleted += Touched;
+            _configWatcher.Renamed += Touched;
+            _configWatcher.Error += (_, args) =>
+                AppLog.Warn("config watcher error (use the tray's Reload config): " + args.GetException().Message);
+            _configWatcher.EnableRaisingEvents = true;
+
+            // The store was read when this object was constructed; anything written between
+            // then and now raised no event. One reload closes that gap.
+            _reloadVia = "watch started";
+            _reloadDebounce.Start();
+        }
+        catch (Exception ex)
+        {
+            // A network share or an odd filesystem: manual reload still works.
+            AppLog.Warn("config folder is not being watched: " + ex.Message);
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _configWatcher?.Dispose();
+        _reloadDebounce?.Stop();
         _timer?.Stop();
         if (_hwnd != IntPtr.Zero)
         {

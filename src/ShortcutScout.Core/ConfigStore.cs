@@ -43,6 +43,14 @@ public sealed class ConfigStore
 
     public ConfigStore(string configDir) { ConfigDir = configDir; Reload(); }
 
+    /// <summary>
+    /// Raised after a file is written, with a line for the log: the path relative to
+    /// <see cref="ConfigDir"/> followed by what changed in it. Text to read, not a path to open.
+    /// Three things can change the config — the settings window, the CLI, an agent over MCP —
+    /// and this is the one place that sees all of them, so the log can say what was written.
+    /// </summary>
+    public event Action<string>? Written;
+
     private string MainPath => Path.Combine(ConfigDir, "shortcuts.json");
     private string AppsDir => Path.Combine(ConfigDir, "apps");
 
@@ -181,6 +189,7 @@ public sealed class ConfigStore
         var root = ReadMainForEdit();
         root["overlay"] = JsonSerializer.SerializeToNode(Config.Overlay, Json);
         WriteAtomic(MainPath, root.ToJsonString(Json));
+        Written?.Invoke("shortcuts.json (overlay)");
     }
 
     /// <summary>
@@ -212,6 +221,7 @@ public sealed class ConfigStore
             else apps.Add(node);
 
             WriteAtomic(MainPath, root.ToJsonString(Json));
+            Written?.Invoke($"shortcuts.json (app '{app.Id}', {app.Shortcuts.Count} shortcuts)");
         }
         else
         {
@@ -234,6 +244,7 @@ public sealed class ConfigStore
 
             Directory.CreateDirectory(AppsDir);
             WriteAtomic(path, JsonSerializer.Serialize(app, Json));
+            Written?.Invoke($"apps/{app.Id}.json ({app.Shortcuts.Count} shortcuts)");
         }
 
         Reload();
