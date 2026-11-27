@@ -16,6 +16,7 @@ public sealed class FileLog
     private readonly Func<DateTime> _now;
     private readonly string _timestampFormat;
     private long _size = -1; // unknown until the first write
+    private readonly Mutex _crossProcess;
 
     // No byte-order mark: it shows up as a stray character in `type`, `cat` and grep output.
     private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
@@ -33,6 +34,11 @@ public sealed class FileLog
         MaxBytes = Math.Max(1024, maxBytes);
         _timestampFormat = timestampFormat;
         _now = now ?? (() => DateTime.Now);
+
+        // Named after the file, so every process logging to it shares the one mutex.
+        var key = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            Encoding.UTF8.GetBytes(Path.GetFullPath(filePath).ToUpperInvariant())))[..16];
+        _crossProcess = new Mutex(false, @"Local\ShortcutScout.Log." + key);
     }
 
     public void Info(string message) => Write("INFO ", message);
@@ -52,26 +58,39 @@ public sealed class FileLog
 
             lock (_gate)
             {
-                if (_size < 0)
+                // The overlay and a `--mcp` / `--cli` process log to the same file. `_gate`
+                // only covers this process, so measuring, rolling over and appending also
+                // happen under a named mutex — otherwise two processes open at the same end
+                // of file and one entry lands on top of the other.
+                var held = false;
+                try
                 {
-                    Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(FilePath))!);
+                    try { held = _crossProcess.WaitOne(TimeSpan.FromMilliseconds(500)); }
+                    catch (AbandonedMutexException) { held = true; } // the other process died mid-write
+                    if (!held) return; // skip the line rather than stall the overlay
+
+                    if (_size < 0)
+                        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(FilePath))!);
+
+                    // Measured every time: another process may have appended or rolled it over.
                     _size = File.Exists(FilePath) ? new FileInfo(FilePath).Length : 0;
-                }
+                    if (_size > 0 && _size + bytes > MaxBytes)
+                    {
+                        File.Move(FilePath, BackupPath, overwrite: true);
+                        _size = 0;
+                    }
 
-                if (_size > 0 && _size + bytes > MaxBytes)
-                {
-                    File.Move(FilePath, BackupPath, overwrite: true);
-                    _size = 0;
+                    using (var stream = new FileStream(FilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+                    {
+                        var data = Utf8NoBom.GetBytes(line);
+                        stream.Write(data, 0, data.Length);
+                    }
+                    _size += bytes;
                 }
-
-                // Shared for writing: the overlay and a `--mcp` / `--cli` process log to the
-                // same file, and AppendAllText's exclusive open made one of them lose its line.
-                using (var stream = new FileStream(FilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+                finally
                 {
-                    var data = Utf8NoBom.GetBytes(line);
-                    stream.Write(data, 0, data.Length);
+                    if (held) _crossProcess.ReleaseMutex();
                 }
-                _size += bytes;
             }
         }
         catch

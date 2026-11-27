@@ -170,7 +170,7 @@ CLI equivalent: `--cli list | show <app> | add <app> <keys> <action> | remove <a
 dotnet test ShortcutScout.sln
 ```
 
-**140 passing**, split into per-concern files under `tests/ShortcutScout.Tests/`, run on every PR by `.github/workflows/ci.yml` (Release build + tests on `windows-latest`). Covers config robustness (a broken file is skipped and named, an edit survives a reload wherever the app was defined, ids that are not plain file names are refused), MCP protocol conformance (no reply to notifications, JSON-RPC error codes, object schemas), log rotation, the rows staying put within one appearance, foreground matching (including Devin/ChatGPT inside Chrome and the browser-hijack regression), priority ordering, config load/save/skip-malformed, the 30s idle boundary, toggle, rotation stability and per-appearance advancement, reveal triggers and their rate limit, the persisted overlay settings round-trip, MCP round-trips through disk, cursor-avoidance geometry — including a sweep of every 40px position across a 1920×1040 work area asserting the panel never lands under the cursor — and the visible-time rotation rules.
+**142 passing**, split into per-concern files under `tests/ShortcutScout.Tests/`, run on every PR by `.github/workflows/ci.yml` (Release build + tests on `windows-latest`). Covers config robustness (a broken file is skipped and named, an edit survives a reload wherever the app was defined, ids that are not plain file names are refused), MCP protocol conformance (no reply to notifications, JSON-RPC error codes, object schemas), log rotation, the rows staying put within one appearance, foreground matching (including Devin/ChatGPT inside Chrome and the browser-hijack regression), priority ordering, config load/save/skip-malformed, the 30s idle boundary, toggle, rotation stability and per-appearance advancement, reveal triggers and their rate limit, the persisted overlay settings round-trip, MCP round-trips through disk, cursor-avoidance geometry — including a sweep of every 40px position across a 1920×1040 work area asserting the panel never lands under the cursor — and the visible-time rotation rules.
 
 ## Verification tooling
 
@@ -205,7 +205,7 @@ Set `SHORTCUTSCOUT_FORCE_IDLE=1` to make the idle appearance reproducible — an
 
 ## What was actually measured
 
-- `dotnet build -c Release`: 0 errors, 0 warnings. `dotnet test`: **140/140**.
+- `dotnet build -c Release`: 0 errors, 0 warnings. `dotnet test`: **142/142**.
 - Window styles on the live process: `0x080800A8` — layered, transparent, topmost, no-activate, tool-window.
 - Run-away: with the panel docked right at `(960,646)`, moving the cursor to the right side sent it to `(20,20)` — it crosses the screen rather than shuffling along one edge.
 - Idle: trace shows `idle=31s opacity=1.00` and `idle=0s opacity=0.92`, i.e. the 30s threshold drives it.

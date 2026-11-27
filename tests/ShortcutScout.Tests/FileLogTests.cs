@@ -130,8 +130,12 @@ public class FileLogTests
             mcp.Info("from-mcp");
         }
 
-        var text = File.ReadAllText(path);
-        StringAssert.Contains(text, "from-overlay");
-        StringAssert.Contains(text, "from-mcp");
+        // And the two racing each other must not write over one another's entries.
+        Parallel.For(0, 400, i => (i % 2 == 0 ? overlay : mcp).Info($"entry-{i:000}"));
+
+        var lines = File.ReadAllLines(path);
+        Assert.AreEqual(402, lines.Length);
+        Assert.IsTrue(lines.Any(l => l.EndsWith("from-overlay")) && lines.Any(l => l.EndsWith("from-mcp")));
+        Assert.AreEqual(400, lines.Where(l => l.Contains("entry-")).Select(l => l.Split("entry-")[1]).Distinct().Count());
     }
 }
