@@ -53,7 +53,7 @@
         <ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/>
       </Grid.ColumnDefinitions>
       <TextBlock Grid.Column="0" Text="Text size"/>
-      <Slider x:Name="FontSlider" Grid.Column="1" Minimum="9" Maximum="24" SmallChange="1" IsSnapToTickEnabled="True" TickFrequency="1"/>
+      <Slider x:Name="FontSlider" AutomationProperties.Name="Text size" Grid.Column="1" Minimum="9" Maximum="24" SmallChange="1" IsSnapToTickEnabled="True" TickFrequency="1"/>
       <TextBlock x:Name="FontValue" Grid.Column="2" Style="{StaticResource Value}"/>
     </Grid>
 
@@ -62,7 +62,7 @@
         <ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/>
       </Grid.ColumnDefinitions>
       <TextBlock Grid.Column="0" Text="Width"/>
-      <Slider x:Name="WidthSlider" Grid.Column="1" Minimum="240" Maximum="900" SmallChange="10" TickFrequency="10" IsSnapToTickEnabled="True"/>
+      <Slider x:Name="WidthSlider" AutomationProperties.Name="Width" Grid.Column="1" Minimum="240" Maximum="900" SmallChange="10" TickFrequency="10" IsSnapToTickEnabled="True"/>
       <TextBlock x:Name="WidthValue" Grid.Column="2" Style="{StaticResource Value}"/>
     </Grid>
 
@@ -71,7 +71,7 @@
         <ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/>
       </Grid.ColumnDefinitions>
       <TextBlock Grid.Column="0" Text="Rows shown"/>
-      <Slider x:Name="RowsSlider" Grid.Column="1" Minimum="2" Maximum="16" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True"/>
+      <Slider x:Name="RowsSlider" AutomationProperties.Name="Rows shown" Grid.Column="1" Minimum="2" Maximum="16" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True"/>
       <TextBlock x:Name="RowsValue" Grid.Column="2" Style="{StaticResource Value}"/>
     </Grid>
 
@@ -80,7 +80,7 @@
         <ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/>
       </Grid.ColumnDefinitions>
       <TextBlock Grid.Column="0" Text="Peek duration (s)"/>
-      <Slider x:Name="PeekSlider" Grid.Column="1" Minimum="2" Maximum="30" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True"/>
+      <Slider x:Name="PeekSlider" AutomationProperties.Name="Peek duration" Grid.Column="1" Minimum="2" Maximum="30" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True"/>
       <TextBlock x:Name="PeekValue" Grid.Column="2" Style="{StaticResource Value}"/>
     </Grid>
 
@@ -89,7 +89,7 @@
         <ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/>
       </Grid.ColumnDefinitions>
       <TextBlock Grid.Column="0" Text="Re-show every (s)"/>
-      <Slider x:Name="RePeekSlider" Grid.Column="1" Minimum="0" Maximum="600" SmallChange="10" TickFrequency="10" IsSnapToTickEnabled="True"/>
+      <Slider x:Name="RePeekSlider" AutomationProperties.Name="Re-show every" Grid.Column="1" Minimum="0" Maximum="600" SmallChange="10" TickFrequency="10" IsSnapToTickEnabled="True"/>
       <TextBlock x:Name="RePeekValue" Grid.Column="2" Style="{StaticResource Value}"/>
     </Grid>
 
@@ -98,7 +98,7 @@
         <ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/>
       </Grid.ColumnDefinitions>
       <TextBlock Grid.Column="0" Text="Rotate rows every (s)"/>
-      <Slider x:Name="RotateSlider" Grid.Column="1" Minimum="0" Maximum="60" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True"/>
+      <Slider x:Name="RotateSlider" AutomationProperties.Name="Rotate rows every" Grid.Column="1" Minimum="0" Maximum="60" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True"/>
       <TextBlock x:Name="RotateValue" Grid.Column="2" Style="{StaticResource Value}"/>
     </Grid>
 
@@ -107,7 +107,7 @@
         <ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/>
       </Grid.ColumnDefinitions>
       <TextBlock Grid.Column="0" Text="Idle reveal after (s)"/>
-      <Slider x:Name="IdleSlider" Grid.Column="1" Minimum="5" Maximum="300" SmallChange="5" TickFrequency="5" IsSnapToTickEnabled="True"/>
+      <Slider x:Name="IdleSlider" AutomationProperties.Name="Idle reveal after" Grid.Column="1" Minimum="5" Maximum="300" SmallChange="5" TickFrequency="5" IsSnapToTickEnabled="True"/>
       <TextBlock x:Name="IdleValue" Grid.Column="2" Style="{StaticResource Value}"/>
     </Grid>
 
@@ -116,7 +116,7 @@
         <ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/>
       </Grid.ColumnDefinitions>
       <TextBlock Grid.Column="0" Text="Ambient opacity"/>
-      <Slider x:Name="OpacitySlider" Grid.Column="1" Minimum="0.54" Maximum="1" SmallChange="0.02" TickFrequency="0.02" IsSnapToTickEnabled="True"/>
+      <Slider x:Name="OpacitySlider" AutomationProperties.Name="Ambient opacity" Grid.Column="1" Minimum="0.54" Maximum="1" SmallChange="0.02" TickFrequency="0.02" IsSnapToTickEnabled="True"/>
       <TextBlock x:Name="OpacityValue" Grid.Column="2" Style="{StaticResource Value}"/>
     </Grid>
 

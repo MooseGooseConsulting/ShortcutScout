@@ -1,7 +1,10 @@
 namespace ShortcutScout.Core;
 
 /// <summary>What one timer tick decided for the overlay.</summary>
-public readonly record struct OverlayTick(double Target, long RotationSlot, bool PeekCountedRotation);
+/// <param name="FreshAppearance">The panel is becoming visible this tick; the slide clock restarts.</param>
+/// <param name="Slide">Step to the next slice while staying visible.</param>
+public readonly record struct OverlayTick(
+    double Target, long RotationSlot, bool PeekCountedRotation, bool FreshAppearance, bool Slide);
 
 /// <summary>
 /// The decisions a single 500ms tick makes: how visible the panel should be, and which
@@ -30,6 +33,11 @@ public static class OverlayTicker
     /// <param name="peekCountedRotation">
     /// True when a peek already advanced <paramref name="rotationSlot"/> for this appearance.
     /// </param>
+    /// <param name="secondsSinceSlide">
+    /// Time since the last slice change *or* since this appearance began, whichever is later.
+    /// The caller resets that clock whenever <see cref="OverlayTick.FreshAppearance"/> or
+    /// <see cref="OverlayTick.Slide"/> comes back true.
+    /// </param>
     public static OverlayTick Decide(
         OverlaySettings settings,
         bool hidden,
@@ -38,24 +46,34 @@ public static class OverlayTicker
         double currentOpacity,
         long rotationSlot,
         bool peekCountedRotation,
-        bool obstructed = false)
+        bool obstructed = false,
+        double secondsSinceSlide = 0)
     {
         var target = IdlePolicy.OpacityFor(settings, hidden, idleSeconds, peekRemainingSeconds);
         if (obstructed && !hidden) target = Math.Min(target, ObstructedOpacity);
 
+        var visible = target > InvisibleThreshold;
+        var freshAppearance = visible && currentOpacity <= InvisibleThreshold;
+
         // Rotation counts appearances. A peek advances the slot when it starts; an appearance
         // no peek accounted for — an idle reveal, or an un-hide whose peek the anti-strobe
         // floor refused — advances it here. The flag stops one appearance being counted twice.
-        if (target > InvisibleThreshold && currentOpacity <= InvisibleThreshold)
+        if (freshAppearance)
         {
             if (!peekCountedRotation) rotationSlot++;
             peekCountedRotation = false;
         }
-        else if (target <= InvisibleThreshold)
+        else if (!visible)
         {
             peekCountedRotation = false;
         }
 
-        return new OverlayTick(target, rotationSlot, peekCountedRotation);
+        // Gentle rotation: step through slices while the panel stays up. Never on the opening
+        // tick of an appearance, however stale the caller's clock looks — the rows must not
+        // change the instant the panel arrives.
+        var slide = !freshAppearance && IdlePolicy.SlideDue(settings, visible, secondsSinceSlide);
+        if (slide) rotationSlot++;
+
+        return new OverlayTick(target, rotationSlot, peekCountedRotation, freshAppearance, slide);
     }
 }

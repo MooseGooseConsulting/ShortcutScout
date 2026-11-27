@@ -48,6 +48,21 @@ $screenH = [PS2]::GetSystemMetrics(1)
 $orig = New-Object PS2+PT
 [void][PS2]::GetCursorPos([ref]$orig)
 
+# The panel is left alone while the cursor stays away from it, so a sweep of fixed screen
+# points can report one position simply because nothing threatened it. Hit the panel first
+# to guarantee a dodge, then sweep.
+$r0 = New-Object PS2+RECT
+[void][PS2]::GetWindowRect($h, [ref]$r0)
+$first = New-Object PS2+PT
+$first.X = [int](($r0.Left + $r0.Right) / 2)
+$first.Y = [int](($r0.Top + $r0.Bottom) / 2)
+[void][PS2]::SetCursorPos($first.X, $first.Y)
+Start-Sleep -Milliseconds 1500
+$r1 = New-Object PS2+RECT
+[void][PS2]::GetWindowRect($h, [ref]$r1)
+$dodged = ($r1.Left -ne $r0.Left) -or ($r1.Top -ne $r0.Top)
+Write-Output ("OPENING_DODGE {0}  ({1},{2}) -> ({3},{4})" -f $dodged, $r0.Left, $r0.Top, $r1.Left, $r1.Top)
+
 # Fractions of the screen: both corners and the middle band, so a corner-only strategy
 # shows up as repeats.
 $points = @(
@@ -57,6 +72,7 @@ $points = @(
 )
 
 $seen = @{}
+$seen["$($r1.Left),$($r1.Top)"] = $true   # the post-dodge position counts as observed
 foreach ($p in $points) {
   $x = [int]($screenW * $p[0]); $y = [int]($screenH * $p[1])
   [void][PS2]::SetCursorPos($x, $y)

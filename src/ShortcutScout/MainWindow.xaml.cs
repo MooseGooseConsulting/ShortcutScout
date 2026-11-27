@@ -156,25 +156,18 @@ public partial class MainWindow : Window
         // this returns is used by the rows below.
         var tickState = OverlayTicker.Decide(
             settings, _toggle.Hidden, idle, peekRemaining,
-            _currentOpacity, _rotationSlot, _peekCountedRotation, _obstructed);
+            _currentOpacity, _rotationSlot, _peekCountedRotation, _obstructed,
+            secondsSinceSlide: (_clock.Elapsed - _lastSlideAt).TotalSeconds);
 
         _rotationSlot = tickState.RotationSlot;
         _peekCountedRotation = tickState.PeekCountedRotation;
 
-        // Gentle rotation: while the panel is up, step to the next slice every
-        // `rotate_seconds` so a long peek keeps showing new shortcuts instead of freezing on
-        // the same rows. A fresh appearance restarts the clock, so the rows never change the
-        // instant the panel arrives.
-        var visible = tickState.Target > OverlayTicker.InvisibleThreshold;
-        if (visible && _currentOpacity <= OverlayTicker.InvisibleThreshold)
+        // The slide clock restarts on a fresh appearance (so rows never change the instant the
+        // panel arrives) and on every step; `Decide` owns both decisions so they stay testable.
+        if (tickState.FreshAppearance || tickState.Slide)
         {
             _lastSlideAt = _clock.Elapsed;
-        }
-        else if (IdlePolicy.SlideDue(settings, visible, (_clock.Elapsed - _lastSlideAt).TotalSeconds))
-        {
-            _rotationSlot++;
-            _lastSlideAt = _clock.Elapsed;
-            if (Tracing) Log($"rotate -> slot {_rotationSlot} (while visible)");
+            if (tickState.Slide && Tracing) Log($"rotate -> slot {_rotationSlot} (while visible)");
         }
 
         // Rows after the rotation decision, so the first frame of an appearance already shows

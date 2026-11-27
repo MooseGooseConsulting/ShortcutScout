@@ -74,6 +74,13 @@ fading in place instead of blinking. `rotate_seconds: 0` holds the list still fo
 appearance. This is what makes a long peek — and `ambient` mode in particular — keep teaching
 instead of freezing on the same eight rows.
 
+**Two-row limitation:** rotation only reorders the `discovery` entries; the core rows are
+always taken in the same fixed order (`Rotation.Select` fills two core rows before each
+discovery row). So with `max_rows: 2` the panel shows the first two core shortcuts every
+time and the slide is effectively invisible — a discovery entry only reaches the screen
+when there is room for a third row. Raise `max_rows` (the default is `8`) if you want to
+see the rows actually change.
+
 ## Things worth being able to vary (not all implemented)
 
 Grouped by how much they'd change daily use. Implemented ones are marked.
