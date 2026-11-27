@@ -19,6 +19,12 @@ public partial class App : System.Windows.Application
     private WinForms.NotifyIcon? _tray;
     private IntPtr _hwnd;
     private long _tick;
+    private Mutex? _singleInstance;
+    private readonly ErrorBudget _errorBudget = new();
+    private readonly Stopwatch _uptime = Stopwatch.StartNew();
+
+    /// <summary>The overlay, tray and timer are up: from here an error can be survived.</summary>
+    private bool _started;
 
     // Beside the exe first (an installed copy), walking up to the repo's config/ for a dev
     // build; the working directory is only a fallback, since a Start-menu or startup-folder
@@ -29,9 +35,28 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        InstallCrashLogging();
+
         if (e.Args.Contains("--mcp")) { RunMcp(); Shutdown(); return; }
         if (e.Args.Contains("--sample")) { RunSample(e.Args); Shutdown(); return; }
         if (e.Args.Contains("--cli")) { RunCli(e.Args); Shutdown(); return; }
+
+        // One overlay per session. A second copy would draw a second panel and fail to
+        // register both hotkeys — which looked like "the hotkey stopped working".
+        _singleInstance = new Mutex(initiallyOwned: true, @"Local\ShortcutScout.Overlay", out var first);
+        if (!first)
+        {
+            AppLog.Warn("another ShortcutScout overlay is already running in this session; exiting");
+            _singleInstance.Dispose();
+            _singleInstance = null;
+            Shutdown();
+            return;
+        }
+
+        var version = typeof(App).Assembly.GetName().Version;
+        AppLog.Info($"starting v{version} pid={Environment.ProcessId} config='{_store.ConfigDir}' " +
+                    $"apps={_store.Config.Apps.Count} mode={_store.Config.Overlay.Mode} " +
+                    $"trace={(AppLog.Tracing ? AppLog.TracePath : "off")}");
 
         _win = new MainWindow(_store, _toggle, _rotation);
         _win.Show();
@@ -42,25 +67,43 @@ public partial class App : System.Windows.Application
         source?.AddHook(HotkeyHook);
         var okToggle = Win32.RegisterHotKey(_hwnd, Win32.HOTKEY_ID, Win32.MOD_CTRL | Win32.MOD_ALT | Win32.MOD_NOREPEAT, Win32.VK_S);
         var okSettings = Win32.RegisterHotKey(_hwnd, Win32.HOTKEY_SETTINGS_ID, Win32.MOD_CTRL | Win32.MOD_ALT | Win32.MOD_NOREPEAT, Win32.VK_O);
-        Log($"hwnd=0x{_hwnd.ToInt64():X} source={(source != null)} toggleHotkey={okToggle} settingsHotkey={okSettings}");
+        AppLog.Trace($"app: hwnd=0x{_hwnd.ToInt64():X} source={(source != null)} toggleHotkey={okToggle} settingsHotkey={okSettings}");
 
         SetupTray();
         ReportLoadErrors();
+
+        // RegisterHotKey fails when another program owns the combination. Nothing else in the
+        // app would ever tell you; the tray menu still works, so say so rather than exit.
+        if (!okToggle || !okSettings)
+        {
+            var taken = string.Join(" and ", new[] { okToggle ? null : "Ctrl+Alt+S", okSettings ? null : "Ctrl+Alt+O" }
+                .Where(k => k != null));
+            AppLog.Warn($"could not register {taken}: already in use by another program");
+            _tray?.ShowBalloonTip(8000, "ShortcutScout: hotkey unavailable",
+                $"{taken} is taken by another program. Use this tray icon instead.", WinForms.ToolTipIcon.Warning);
+        }
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _timer.Tick += (_, __) => { _tick++; _win?.Refresh(_tick); };
+        _timer.Tick += (_, __) =>
+        {
+            // Caught here, not left to the dispatcher handler: DispatcherTimer re-arms only
+            // after Tick returns normally, so an exception that escaped was "survived" by an
+            // overlay whose timer never fired again — frozen, with the tray still alive.
+            try { _tick++; _win?.Refresh(_tick); }
+            catch (Exception ex) { SurviveOrStop("a tick failed", ex); }
+        };
         _timer.Start();
         _win.Refresh(0);
+        _started = true;
     }
 
     private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
         if (msg == Win32.WM_HOTKEY)
         {
-            Log($"hotkey id={wParam.ToInt32()}");
             switch (wParam.ToInt32())
             {
                 case Win32.HOTKEY_ID:
-                    _toggle.Toggle();
+                    ToggleHidden("hotkey");
                     handled = true;
                     break;
                 case Win32.HOTKEY_SETTINGS_ID:
@@ -78,7 +121,7 @@ public partial class App : System.Windows.Application
     /// </summary>
     private void ShowSettings()
     {
-        Log("settings requested");
+        AppLog.Trace("app: settings requested");
         if (_settings is { IsLoaded: true })
         {
             _settings.Activate();
@@ -91,19 +134,67 @@ public partial class App : System.Windows.Application
         _settings.Activate();
     }
 
-    private static readonly bool Tracing =
-        Environment.GetEnvironmentVariable("SHORTCUTSCOUT_TRACE") == "1";
-
-    private static void Log(string message)
+    private void ToggleHidden(string via)
     {
-        if (!Tracing) return;
+        _toggle.Toggle();
+        AppLog.Info(_toggle.Hidden ? $"hidden ({via})" : $"shown again ({via})");
+    }
+
+    /// <summary>
+    /// A WinExe has no console: an unhandled exception used to end the process with nothing
+    /// written anywhere. Every route an exception can escape by now lands in the event log.
+    /// </summary>
+    private void InstallCrashLogging()
+    {
+        DispatcherUnhandledException += (_, args) =>
+        {
+            args.Handled = true;
+
+            // Nothing to carry on with until the overlay is up — and --mcp, --cli and --sample
+            // never get there. Surviving a startup failure left a process with no window, no
+            // tray and no way out (holding the single-instance mutex, in the overlay's case).
+            if (!_started)
+            {
+                AppLog.Error("startup failed", args.Exception);
+                Shutdown(1);
+                return;
+            }
+
+            SurviveOrStop("unhandled exception on the UI thread", args.Exception);
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            AppLog.Error($"fatal exception (terminating={args.IsTerminating})", args.ExceptionObject as Exception);
+
+        TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            AppLog.Error("unobserved task exception", args.Exception);
+            args.SetObserved();
+        };
+    }
+
+    /// <summary>Log an error the running overlay can outlive, unless they keep coming.</summary>
+    private void SurviveOrStop(string what, Exception ex)
+    {
+        AppLog.Error(what, ex);
+
+        // One bad tick is survivable; the same failure twice a second is not.
+        if (_errorBudget.Absorb(_uptime.Elapsed)) return;
+
+        AppLog.Error($"{_errorBudget.MaxErrors} errors within {_errorBudget.Window.TotalSeconds:0}s; shutting down");
+        _tray?.ShowBalloonTip(10000, "ShortcutScout stopped",
+            "It kept hitting errors. See " + AppLog.EventLogPath, WinForms.ToolTipIcon.Error);
+        Shutdown(1);
+    }
+
+    private void OpenFolder(string path)
+    {
         try
         {
-            File.AppendAllText(
-                Path.Combine(Path.GetTempPath(), "shortcutscout-trace.log"),
-                $"{DateTime.Now:HH:mm:ss.fff} app: {message}{Environment.NewLine}");
+            Directory.CreateDirectory(path);
+            Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
         }
-        catch { /* tracing must never break the app */ }
+        catch (Exception ex) { AppLog.Warn($"could not open '{path}': {ex.Message}"); }
     }
 
     private void SetupTray()
@@ -118,14 +209,26 @@ public partial class App : System.Windows.Application
         var settingsItem = new WinForms.ToolStripMenuItem("Settings… (Ctrl+Alt+O)");
         settingsItem.Click += (_, __) => ShowSettings();
         var toggleItem = new WinForms.ToolStripMenuItem("Hide / Show (Ctrl+Alt+S)");
-        toggleItem.Click += (_, __) => _toggle.Toggle();
+        toggleItem.Click += (_, __) => ToggleHidden("tray");
         var reloadItem = new WinForms.ToolStripMenuItem("Reload config");
-        reloadItem.Click += (_, __) => { _store.Reload(); _win?.ApplySettings(); ReportLoadErrors(); };
+        reloadItem.Click += (_, __) =>
+        {
+            _store.Reload();
+            _win?.ApplySettings();
+            AppLog.Info($"config reloaded: apps={_store.Config.Apps.Count} errors={_store.LoadErrors.Count}");
+            ReportLoadErrors();
+        };
+        var configItem = new WinForms.ToolStripMenuItem("Open config folder");
+        configItem.Click += (_, __) => OpenFolder(_store.ConfigDir);
+        var logItem = new WinForms.ToolStripMenuItem("Open log folder");
+        logItem.Click += (_, __) => OpenFolder(AppLog.Folder);
         var exitItem = new WinForms.ToolStripMenuItem("Exit");
         exitItem.Click += (_, __) => Shutdown();
         menu.Items.Add(settingsItem);
         menu.Items.Add(toggleItem);
         menu.Items.Add(reloadItem);
+        menu.Items.Add(configItem);
+        menu.Items.Add(logItem);
         menu.Items.Add(new WinForms.ToolStripSeparator());
         menu.Items.Add(exitItem);
         _tray.ContextMenuStrip = menu;
@@ -139,7 +242,7 @@ public partial class App : System.Windows.Application
     private void ReportLoadErrors()
     {
         var errors = _store.LoadErrors;
-        foreach (var error in errors) Log("config: " + error);
+        foreach (var error in errors) AppLog.Warn("config: " + error);
         if (errors.Count == 0 || _tray == null) return;
 
         var text = string.Join(Environment.NewLine, errors.Take(3));
@@ -156,6 +259,12 @@ public partial class App : System.Windows.Application
             Win32.UnregisterHotKey(_hwnd, Win32.HOTKEY_SETTINGS_ID);
         }
         if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }
+        if (_singleInstance != null)
+        {
+            AppLog.Info($"exiting (code {e.ApplicationExitCode}) after {_uptime.Elapsed:d\\.hh\\:mm\\:ss}");
+            _singleInstance.ReleaseMutex();
+            _singleInstance.Dispose();
+        }
         base.OnExit(e);
     }
 
@@ -163,16 +272,14 @@ public partial class App : System.Windows.Application
     private void RunSample(string[] args)
     {
         var i = Array.IndexOf(args, "--sample");
-        if (i + 4 >= args.Length)
+        // A typo ("70O") is a usage error, not an exception.
+        if (i + 4 >= args.Length
+            || !int.TryParse(args[i + 1], out var x) || !int.TryParse(args[i + 2], out var y)
+            || !int.TryParse(args[i + 3], out var w) || !int.TryParse(args[i + 4], out var h))
         {
             Console.WriteLine("usage: --sample <x> <y> <w> <h>");
             return;
         }
-
-        var x = int.Parse(args[i + 1]);
-        var y = int.Parse(args[i + 2]);
-        var w = int.Parse(args[i + 3]);
-        var h = int.Parse(args[i + 4]);
 
         var stats = BackdropSampler.SampleRect(x, y, w, h);
         var theme = BackdropAdaptation.ThemeFor(stats);

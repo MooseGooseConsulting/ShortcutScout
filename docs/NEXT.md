@@ -51,8 +51,8 @@ line spacing, key/action colours, halo strength, dock corner and placement strat
 
 - **Start with Windows** — a shortcut in `shell:startup` is the manual workaround.
 - **Code signing** — unsigned, so SmartScreen warns on a fresh machine.
-- **Tray menu depth** — Settings / Toggle / Reload / Exit only; "Show now" and "Open config
-  folder" (the latter exists in the settings window) would round it out.
+- **Tray "Show now"** — the menu can hide/show, reload and open the config and log folders,
+  but cannot force a peek on demand.
 
 ## 7. Engineering
 
@@ -67,11 +67,7 @@ line spacing, key/action colours, halo strength, dock corner and placement strat
   area, so a sweep is reproducible and never lands on somebody's working desktop.
   Until that exists they stay unrun, and the read-only substitute is the trace,
   which logs cursor and placement every tick.
-- **`SHORTCUTSCOUT_TRACE=1` writes unbounded** to `%TEMP%\shortcutscout-trace.log`, one line
-  every 500 ms while hidden. Fine for a session, worth a size cap before it runs for days.
-- **Only reveals are worth logging permanently.** One line per reveal with its reason
-  (`window change` / `app change` / `re-peek` / `idle`) is what made the "never appears" defect
-  findable at all — that belongs in the normal trace, not behind an env var.
+
 
 ## 8. Known limits that are probably fine
 

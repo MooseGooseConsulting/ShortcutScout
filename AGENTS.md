@@ -46,9 +46,15 @@ dotnet test ShortcutScout.sln               # MSTest, tests/ShortcutScout.Tests/
 
 ## Verification conventions
 
+- Event log (always on): `%LOCALAPPDATA%\ShortcutScout\logs\shortcutscout.log` —
+  startup, each reveal with its reason, config/hotkey problems, exceptions. Read it
+  first when the app misbehaves. Log through `AppLog.Info/Warn/Error` (events) or
+  `AppLog.Trace` (per-tick detail); never write files directly.
 - Trace: `SHORTCUTSCOUT_TRACE=1` logs each tick to
   `%TEMP%\shortcutscout-trace.log`. `SHORTCUTSCOUT_FORCE_IDLE=1` pins the idle
   reveal on for screenshots/tuning. Always kill the app after a traced run.
+- Only one overlay runs per session (named mutex). To test a build while another
+  copy is running, kill that copy first — a second one exits immediately.
 - **Never run `tools/verify_placement.ps1`, `tools/verify_runaway.ps1`, or
   `tools/measure_idle.ps1` without the user's explicit permission** — they move or
   inject the user's real mouse input (`SetCursorPos` in the first two, `mouse_event`
