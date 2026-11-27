@@ -44,7 +44,8 @@ public sealed class ConfigStore
     public ConfigStore(string configDir) { ConfigDir = configDir; Reload(); }
 
     /// <summary>
-    /// Raised after a file is written, with its path relative to <see cref="ConfigDir"/>.
+    /// Raised after a file is written, with a line for the log: the path relative to
+    /// <see cref="ConfigDir"/> followed by what changed in it. Text to read, not a path to open.
     /// Three things can change the config — the settings window, the CLI, an agent over MCP —
     /// and this is the one place that sees all of them, so the log can say what was written.
     /// </summary>

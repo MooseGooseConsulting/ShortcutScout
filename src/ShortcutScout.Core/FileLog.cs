@@ -64,7 +64,13 @@ public sealed class FileLog
                     _size = 0;
                 }
 
-                File.AppendAllText(FilePath, line, Utf8NoBom);
+                // Shared for writing: the overlay and a `--mcp` / `--cli` process log to the
+                // same file, and AppendAllText's exclusive open made one of them lose its line.
+                using (var stream = new FileStream(FilePath, FileMode.Append, FileAccess.Write, FileShare.ReadWrite))
+                {
+                    var data = Utf8NoBom.GetBytes(line);
+                    stream.Write(data, 0, data.Length);
+                }
                 _size += bytes;
             }
         }

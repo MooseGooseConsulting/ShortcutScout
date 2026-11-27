@@ -22,6 +22,8 @@ public partial class App : System.Windows.Application
     private Mutex? _singleInstance;
     private FileSystemWatcher? _configWatcher;
     private DispatcherTimer? _reloadDebounce;
+    private bool _reloadDeferred;
+    private string _reloadVia = "file change";
     private readonly ErrorBudget _errorBudget = new();
     private readonly Stopwatch _uptime = Stopwatch.StartNew();
 
@@ -138,7 +140,12 @@ public partial class App : System.Windows.Application
         }
 
         _settings = new SettingsWindow(_store, () => _win?.ApplySettings());
-        _settings.Closed += (_, __) => _settings = null;
+        _settings.Closed += (_, __) =>
+        {
+            _settings = null;
+            // Watching was paused, not switched off: replay what arrived meanwhile.
+            if (_reloadDeferred) { _reloadDeferred = false; _reloadDebounce?.Start(); }
+        };
         _settings.Show();
         _settings.Activate();
     }
@@ -300,19 +307,31 @@ public partial class App : System.Windows.Application
                 // The settings window is an editor with unsaved in-memory changes; reloading
                 // underneath it would overwrite the value being dragged. Its own saves are
                 // what we would be reacting to anyway.
-                if (_settings != null) return;
-                ReloadConfig("file change");
+                // Deferred, not dropped: the edit is replayed when the window closes.
+                if (_settings != null) { _reloadDeferred = true; return; }
+                var via = _reloadVia; _reloadVia = "file change";
+                ReloadConfig(via);
             };
 
-            _configWatcher = new FileSystemWatcher(_store.ConfigDir, "*.json")
+            // No name filter: it would also hide the `apps` folder itself being renamed or
+            // deleted, which changes what loads without touching a single .json file.
+            _configWatcher = new FileSystemWatcher(_store.ConfigDir)
             {
                 IncludeSubdirectories = true,
-                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName | NotifyFilters.Size,
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName
+                             | NotifyFilters.DirectoryName | NotifyFilters.Size,
             };
 
+            static bool Relevant(string? path) =>
+                path != null && (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                                 || Path.GetExtension(path).Length == 0); // a folder, e.g. apps
+
             // Raised on a thread-pool thread: only restart the timer, and do it on the UI thread.
-            void Touched(object? sender, EventArgs args) =>
+            void Touched(object? sender, FileSystemEventArgs args)
+            {
+                if (!Relevant(args.FullPath) && !(args is RenamedEventArgs r && Relevant(r.OldFullPath))) return;
                 Dispatcher.BeginInvoke(() => { _reloadDebounce.Stop(); _reloadDebounce.Start(); });
+            }
 
             _configWatcher.Changed += Touched;
             _configWatcher.Created += Touched;
@@ -321,6 +340,11 @@ public partial class App : System.Windows.Application
             _configWatcher.Error += (_, args) =>
                 AppLog.Warn("config watcher error (use the tray's Reload config): " + args.GetException().Message);
             _configWatcher.EnableRaisingEvents = true;
+
+            // The store was read when this object was constructed; anything written between
+            // then and now raised no event. One reload closes that gap.
+            _reloadVia = "watch started";
+            _reloadDebounce.Start();
         }
         catch (Exception ex)
         {
