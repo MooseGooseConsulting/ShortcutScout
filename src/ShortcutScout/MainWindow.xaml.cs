@@ -51,6 +51,11 @@ public partial class MainWindow : Window
 
 
     private long _lastWindowKey;
+    private AppConfig? _lastApp;
+
+    /// <summary>Identifies the newest fade, so a superseded fade-out can't hide the window.</summary>
+    private int _fadeGeneration;
+    private bool _fadeOutRunning;
 
     // Pointer stillness, tracked independently of GetLastInputInfo (see CurrentIdleSeconds).
     private double _lastPointerX = double.NaN, _lastPointerY = double.NaN;
@@ -281,10 +286,19 @@ public partial class MainWindow : Window
     private AppConfig? ObserveTriggers(OverlaySettings settings)
     {
         var hwnd = Win32.GetForegroundWindow();
-        var fg = ForegroundReader.Read();
+
+        // No foreground window: focus is mid-switch, or the session is locked. Keep showing
+        // what we had rather than "switching" to the fallback app for one tick.
+        if (hwnd == IntPtr.Zero && _lastApp != null && _store.Config.Apps.Contains(_lastApp))
+            return _lastApp;
+
+        // Same handle for the title and the trigger: asking Windows twice could describe one
+        // window and key the reveal on another.
+        var fg = ForegroundReader.Read(hwnd);
         var matched = Matcher.Match(_store.Config.Apps, fg);
         var app = matched ?? _store.Config.Apps.FirstOrDefault(a => a.Id == "global");
         var appId = app?.Id ?? "";
+        _lastApp = app;
 
         // While explicitly hidden (Ctrl+Alt+S) a switch stays *pending*: consuming it would
         // swallow the change, so un-hiding would show nothing until an unrelated trigger.
@@ -303,11 +317,11 @@ public partial class MainWindow : Window
         var started = false;
         if (app is { Shortcuts.Count: > 0 } && !_toggle.Hidden)
         {
-            if (windowChanged) started = StartPeek(settings, "window change");
-            else if (appChanged) started = StartPeek(settings, "app change");
+            if (windowChanged) started = StartPeek(settings, appId, "window change");
+            else if (appChanged) started = StartPeek(settings, appId, "app change");
             else if (IdlePolicy.RePeekDue(settings, _toggle.Hidden,
                          (_clock.Elapsed - _lastRevealAt).TotalSeconds))
-                started = StartPeek(settings, "re-peek");
+                started = StartPeek(settings, appId, "re-peek");
         }
 
         // A trigger that the anti-strobe floor rejected stays *pending* and is retried on the
@@ -315,7 +329,7 @@ public partial class MainWindow : Window
         // peeks make the cooldown longer than the peek itself).
         if (!_toggle.Hidden && (started || !triggered))
         {
-            _lastWindowKey = windowKey;
+            _lastWindowKey = window.WindowKey;
             _lastAppId = appId;
         }
 
@@ -347,7 +361,7 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Start a peek. Returns false when the anti-strobe floor refused it.</summary>
-    private bool StartPeek(OverlaySettings settings, string reason)
+    private bool StartPeek(OverlaySettings settings, string appId, string reason)
     {
         if ((_clock.Elapsed - _lastPeekStart).TotalSeconds < MinPeekGapSeconds) return false;
 
@@ -367,7 +381,8 @@ public partial class MainWindow : Window
         _rotationSlot++;
         _peekCountedRotation = true;
 
-        if (Tracing) Log($"peek started for '{_lastAppId}' ({reason}) slot={_rotationSlot} for {settings.PeekSeconds}s");
+        // `appId` is the app being revealed; `_lastAppId` is still the previous one here.
+        if (Tracing) Log($"peek started for '{appId}' ({reason}) slot={_rotationSlot} for {settings.PeekSeconds}s");
         return true;
     }
 
@@ -382,20 +397,42 @@ public partial class MainWindow : Window
 
     private void ApplyOpacity(double target, OverlaySettings settings)
     {
-        Visibility = target <= 0 ? Visibility.Hidden : Visibility.Visible;
+        if (target > 0) Visibility = Visibility.Visible;
 
-        if (Math.Abs(target - _currentOpacity) < 0.005) return;
+        if (Math.Abs(target - _currentOpacity) < 0.005)
+        {
+            // Already at rest. Hidden rather than merely transparent, unless a fade-out is
+            // still on its way there.
+            if (target <= 0 && !_fadeOutRunning) Visibility = Visibility.Hidden;
+            return;
+        }
 
         var from = Math.Max(_currentOpacity, 0);
         _currentOpacity = target;
 
         var duration = TimeSpan.FromMilliseconds(
-            IdlePolicy.FadeDurationMs(settings, from, target));
+            Math.Max(0, IdlePolicy.FadeDurationMs(settings, from, target)));
 
         var anim = new DoubleAnimation(target, duration)
         {
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
         };
+
+        // Hide the window when the fade-out FINISHES. Hiding it up front, as this did, removed
+        // the window before the first frame of the animation: `fade_out_ms` did nothing and
+        // the panel always vanished with a hard cut.
+        var generation = ++_fadeGeneration;
+        _fadeOutRunning = target <= 0;
+        if (_fadeOutRunning)
+        {
+            anim.Completed += (_, __) =>
+            {
+                if (generation != _fadeGeneration) return; // a newer fade took over
+                _fadeOutRunning = false;
+                if (_currentOpacity <= 0) Visibility = Visibility.Hidden;
+            };
+        }
+
         BeginAnimation(OpacityProperty, anim);
     }
 
@@ -453,9 +490,8 @@ public partial class MainWindow : Window
 
 internal static class ForegroundReader
 {
-    public static ForegroundInfo Read()
+    public static ForegroundInfo Read(IntPtr hwnd)
     {
-        var hwnd = Win32.GetForegroundWindow();
         if (hwnd == IntPtr.Zero) return new("", "", "");
 
         var sb = new StringBuilder(512);

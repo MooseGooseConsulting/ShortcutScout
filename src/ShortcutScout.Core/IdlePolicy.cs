@@ -84,7 +84,12 @@ public static class IdlePolicy
             ? OverlayMode.Ambient
             : OverlayMode.Peek;
 
-    public static bool IsIdle(int idleSeconds, int threshold) => idleSeconds >= threshold;
+    /// <summary>
+    /// A threshold of 0 (or less) turns the idle reveal off, the same way 0 disables
+    /// <c>re_peek_seconds</c> and <c>rotate_seconds</c>. Read literally it would mean "always
+    /// idle", which pinned the panel on screen at full opacity for good.
+    /// </summary>
+    public static bool IsIdle(int idleSeconds, int threshold) => threshold > 0 && idleSeconds >= threshold;
 
     /// <summary>
     /// Combine OS input-idle with measured pointer stillness.
