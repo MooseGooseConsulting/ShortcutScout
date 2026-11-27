@@ -14,9 +14,17 @@ public static class RevealPolicy
     /// indefinitely, if periodic reveals are disabled.
     /// </summary>
     public static TriggerState ObserveWindow(long lastWindowKey, long currentWindowKey, bool hidden)
-        => hidden
+        => hidden || currentWindowKey == NoWindow
             ? new TriggerState(false, lastWindowKey)
             : new TriggerState(currentWindowKey != lastWindowKey, currentWindowKey);
+
+    /// <summary>
+    /// What <c>GetForegroundWindow</c> returns while focus is in transit between windows, and
+    /// on the lock screen. It is not a window the user switched *to*: treating it as one fired
+    /// a peek for the fallback app mid-alt-tab, and the anti-strobe gap then delayed the peek
+    /// for the window that actually arrived.
+    /// </summary>
+    public const long NoWindow = 0;
 
     /// <summary>Same rule for the matched app, which changes on tab switches in one window.</summary>
     public static bool ObserveAppChange(string lastAppId, string currentAppId, bool hidden)

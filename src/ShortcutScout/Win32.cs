@@ -71,9 +71,17 @@ public static class Win32
         return (int)(elapsedMs / 1000u);
     }
 
+    private static POINT _lastCursor;
+
+    /// <summary>
+    /// Cursor position in physical pixels. <c>GetCursorPos</c> fails on the secure desktop
+    /// (UAC prompt, lock screen); the last good position is returned then, because (0,0)
+    /// would read as the pointer leaping to the top-left corner — a dodge away from nothing,
+    /// and a reset of the pointer-stillness idle clock.
+    /// </summary>
     public static (int x, int y) CursorPos()
     {
-        GetCursorPos(out var p);
-        return (p.X, p.Y);
+        if (GetCursorPos(out var p)) _lastCursor = p;
+        return (_lastCursor.X, _lastCursor.Y);
     }
 }

@@ -32,13 +32,13 @@ same id, the first one loaded wins and the other is reported as ignored.
 |---|---|---|
 | `mode` | `"peek"` | `peek` = hidden while you work; `ambient` = always visible at `active_opacity` |
 | `rotate_seconds` | `4` | Seconds between steps while the panel is visible; `0` holds it still |
-| `idle_threshold_seconds` | `30` | Seconds of being away before the panel comes up and stays up. Measured as the larger of OS input-idle and pointer stillness — see below |
+| `idle_threshold_seconds` | `30` | Seconds of being away before the panel comes up and stays up. `0` disables the idle reveal. Measured as the larger of OS input-idle and pointer stillness — see below |
 | `peek_seconds` | `6` | How long one appearance lasts |
 | `re_peek_seconds` | `90` | Show again unprompted after this long with nothing revealed. `0` disables it |
 | `active_opacity` | `0.9` | Ambient-mode resting opacity (never allowed below the readable floor of `0.54`) |
 | `idle_opacity` | `1.0` | Opacity used for idle reveals and peeks |
 | `fade_in_ms` | `200` | Fade-in duration |
-| `fade_out_ms` | `180` | Fade-out duration (leaving needs less attention than arriving) |
+| `fade_out_ms` | `180` | Fade-out duration (leaving needs less attention than arriving). The window is hidden when the fade finishes |
 | `font_size` | `13` | Text size in DIPs |
 | `width` | `460` | Overlay width in DIPs |
 | `max_rows` | `8` | How many shortcut rows to show at once |
