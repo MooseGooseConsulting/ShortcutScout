@@ -50,6 +50,9 @@ public partial class MainWindow : Window
     /// <summary>Which slice of the shortcut list is currently on screen.</summary>
     private long _rotationSlot;
 
+    /// <summary>Set when the current peek already advanced the rotation.</summary>
+    private bool _peekCountedRotation;
+
     private static readonly bool Tracing =
         Environment.GetEnvironmentVariable("SHORTCUTSCOUT_TRACE") == "1";
 
@@ -128,6 +131,20 @@ public partial class MainWindow : Window
 
         var target = IdlePolicy.OpacityFor(settings, _toggle.Hidden, idle, peekRemaining);
         if (_obstructed && !_toggle.Hidden) target = Math.Min(target, 0.14);
+
+        // Rotation counts *appearances*. A peek advances the slot when it starts (which is
+        // the only event ambient mode ever gets, since the panel never becomes invisible),
+        // and an appearance not caused by a peek — an idle reveal — advances it here. The
+        // flag keeps one appearance from being counted twice.
+        if (target > 0.001 && _currentOpacity <= 0.001)
+        {
+            if (!_peekCountedRotation) _rotationSlot++;
+            _peekCountedRotation = false;
+        }
+        else if (target <= 0.001)
+        {
+            _peekCountedRotation = false;
+        }
 
         ApplyOpacity(target, settings);
 
@@ -212,15 +229,17 @@ public partial class MainWindow : Window
         var app = matched ?? _store.Config.Apps.FirstOrDefault(a => a.Id == "global");
         var appId = app?.Id ?? "";
 
-        var windowKey = hwnd.ToInt64();
-        var windowChanged = windowKey != _lastWindowKey;
-        _lastWindowKey = windowKey;
+        // While explicitly hidden (Ctrl+Alt+S) a switch stays *pending*: consuming it would
+        // swallow the change, so un-hiding would show nothing until an unrelated trigger.
+        var window = RevealPolicy.ObserveWindow(_lastWindowKey, hwnd.ToInt64(), _toggle.Hidden);
+        _lastWindowKey = window.WindowKey;
+        var windowChanged = window.Changed;
 
         // Title-matched apps are detected per *tab*, not per window: switching from Devin
         // to ChatGPT inside the same Chrome window changes the app but not the handle, so
         // an app change has to stay a reveal trigger in its own right.
-        var appChanged = appId != _lastAppId;
-        _lastAppId = appId;
+        var appChanged = RevealPolicy.ObserveAppChange(_lastAppId, appId, _toggle.Hidden);
+        if (!_toggle.Hidden) _lastAppId = appId;
 
         // Decide the reveal BEFORE building rows: StartPeek advances the rotation slot, so
         // the slice that appears is the new one instead of swapping a tick later.
@@ -271,6 +290,7 @@ public partial class MainWindow : Window
         // hidden transition) also rotates in ambient mode, where the panel never goes
         // invisible and the old code therefore froze the list.
         _rotationSlot++;
+        _peekCountedRotation = true;
 
         if (Tracing) Log($"peek started for '{_lastAppId}' ({reason}) slot={_rotationSlot} for {settings.PeekSeconds}s");
     }
