@@ -16,6 +16,7 @@ agent over MCP (`ShortcutScout.exe --mcp`). All three write the same files.
 | Key | Default | What it does |
 |---|---|---|
 | `mode` | `"peek"` | `peek` = hidden while you work; `ambient` = always visible at `active_opacity` |
+| `rotate_seconds` | `4` | Seconds between steps while the panel is visible; `0` holds it still |
 | `idle_threshold_seconds` | `30` | Seconds of being away before the panel comes up and stays up. Measured as the larger of OS input-idle and pointer stillness — see below |
 | `peek_seconds` | `6` | How long one appearance lasts |
 | `re_peek_seconds` | `90` | Show again unprompted after this long with nothing revealed. `0` disables it |
@@ -68,9 +69,10 @@ Rotation advances **once per appearance**, so every time you see the panel it's 
 slice of the list. It does not tick on a wall clock: the old 3-minute timer rotated while nobody
 was looking, which is how the list appeared never to change.
 
-Rotation is driven by reveals, so it only moves when the panel appears. In `ambient` mode that
-means a window switch or a periodic re-peek; with `re_peek_seconds: 0` and no window switches,
-an ambient list stays put.
+While the panel is up, the rows also step to the next slice every `rotate_seconds` (default 4),
+fading in place instead of blinking. `rotate_seconds: 0` holds the list still for the whole
+appearance. This is what makes a long peek — and `ambient` mode in particular — keep teaching
+instead of freezing on the same eight rows.
 
 ## Things worth being able to vary (not all implemented)
 

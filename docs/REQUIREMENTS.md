@@ -70,9 +70,11 @@ The earlier design rotated every 3 minutes of uptime, spent while the panel was 
 could watch it for an hour and see the same rows. Counting appearances means every look is a
 different slice.
 
-**Limit:** rotation is driven by reveals, so it only moves when the panel appears. In `ambient`
-mode that means a window switch or a periodic re-peek (`re_peek_seconds`); with periodic
-reveals disabled and no window switches, an ambient list is static.
+While the panel is visible the rows also step every `rotate_seconds` (default 4) and fade in
+place, so a long peek and `ambient` mode keep moving rather than freezing on one slice
+(`Slide_FiresOnlyWhileVisible_AndOnlyAfterTheFullInterval`). A fresh appearance restarts that
+clock, so the rows never change the instant the panel arrives. `rotate_seconds: 0` restores the
+older behaviour of one slice per appearance.
 
 ## 5. Transparent, always-on-top, click-through, fully invisible when off — Met
 

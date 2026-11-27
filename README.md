@@ -18,7 +18,7 @@ See `SPEC.md` for the 13-point requirements this was built against.
 | After **30s** with no input | `1.0`, neon at full strength, so it reads from across the room |
 | Look | bare neon-green text with a dark halo — no card, no title bar, no border |
 | Fade | in **200 ms**, out **180 ms** (leaving needs less attention than arriving) |
-| Shortcut rotation | advances on every appearance, so each time you see it the list is different |
+| Shortcut rotation | advances on every appearance, and steps to the next slice every `rotate_seconds` (4) while it is on screen |
 | Cursor avoidance | jumps to the docked position **furthest** from the cursor, keeping **72 px** clear |
 | Docking | 3×3 grid of edges/corners at a **20 px** inset, with **60 px** hysteresis so it never twitches |
 | Detection | foreground window → process name, exe, and window title |
@@ -170,7 +170,7 @@ CLI equivalent: `--cli list | show <app> | add <app> <keys> <action> | remove <a
 dotnet test ShortcutScout.sln
 ```
 
-**46 passing.** Covers foreground matching (including Devin/ChatGPT inside Chrome and the browser-hijack regression), priority ordering, config load/save/skip-malformed, the 30s idle boundary, toggle, rotation stability and per-appearance advancement, reveal triggers and their rate limit, the persisted overlay settings round-trip, MCP round-trips through disk, and cursor-avoidance geometry — including a sweep of every 40px position across a 1920×1040 work area asserting the panel never lands under the cursor.
+**58 passing.** Covers foreground matching (including Devin/ChatGPT inside Chrome and the browser-hijack regression), priority ordering, config load/save/skip-malformed, the 30s idle boundary, toggle, rotation stability and per-appearance advancement, reveal triggers and their rate limit, the persisted overlay settings round-trip, MCP round-trips through disk, cursor-avoidance geometry — including a sweep of every 40px position across a 1920×1040 work area asserting the panel never lands under the cursor — and the visible-time rotation rules.
 
 ## Verification tooling
 

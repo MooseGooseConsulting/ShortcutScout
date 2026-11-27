@@ -803,6 +803,33 @@ public class Tests
         Assert.IsFalse(hidden.PeekCountedRotation, "a hidden tick clears the flag");
     }
 
+    [TestMethod]
+    public void Slide_FiresOnlyWhileVisible_AndOnlyAfterTheFullInterval()
+    {
+        var settings = new OverlaySettings { RotateSeconds = 8 };
+
+        Assert.IsFalse(IdlePolicy.SlideDue(settings, visible: true, secondsSinceSlide: 7.9));
+        Assert.IsTrue(IdlePolicy.SlideDue(settings, visible: true, secondsSinceSlide: 8));
+        Assert.IsFalse(IdlePolicy.SlideDue(settings, visible: false, secondsSinceSlide: 60),
+            "a hidden panel must not consume slices");
+    }
+
+    [TestMethod]
+    public void Slide_ZeroHoldsTheListStill()
+    {
+        var settings = new OverlaySettings { RotateSeconds = 0 };
+        Assert.IsFalse(IdlePolicy.SlideDue(settings, visible: true, secondsSinceSlide: 600));
+    }
+
+    [TestMethod]
+    public void Slide_DefaultStepsWhileThePanelIsUp()
+    {
+        // The panel should keep teaching during a long peek, not freeze on the first slice.
+        var settings = new OverlaySettings();
+        Assert.IsTrue(settings.RotateSeconds > 0);
+        Assert.IsTrue(IdlePolicy.SlideDue(settings, visible: true, secondsSinceSlide: settings.RotateSeconds));
+    }
+
     private static string FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);

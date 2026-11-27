@@ -59,6 +59,9 @@ public partial class MainWindow : Window
     /// <summary>Counts actual relocations, so each dodge picks a different clear position.</summary>
     private int _placementCount;
 
+    /// <summary>When the visible rows last stepped to the next slice.</summary>
+    private TimeSpan _lastSlideAt = TimeSpan.Zero;
+
     private const double PointerMoveThresholdPx = 6;
 
     /// <summary>Which slice of the shortcut list is currently on screen.</summary>
@@ -157,6 +160,22 @@ public partial class MainWindow : Window
 
         _rotationSlot = tickState.RotationSlot;
         _peekCountedRotation = tickState.PeekCountedRotation;
+
+        // Gentle rotation: while the panel is up, step to the next slice every
+        // `rotate_seconds` so a long peek keeps showing new shortcuts instead of freezing on
+        // the same rows. A fresh appearance restarts the clock, so the rows never change the
+        // instant the panel arrives.
+        var visible = tickState.Target > OverlayTicker.InvisibleThreshold;
+        if (visible && _currentOpacity <= OverlayTicker.InvisibleThreshold)
+        {
+            _lastSlideAt = _clock.Elapsed;
+        }
+        else if (IdlePolicy.SlideDue(settings, visible, (_clock.Elapsed - _lastSlideAt).TotalSeconds))
+        {
+            _rotationSlot++;
+            _lastSlideAt = _clock.Elapsed;
+            if (Tracing) Log($"rotate -> slot {_rotationSlot} (while visible)");
+        }
 
         // Rows after the rotation decision, so the first frame of an appearance already shows
         // the slice that decision selected.
@@ -345,6 +364,7 @@ public partial class MainWindow : Window
         // RePeekDue true forever after the first interval, so the panel re-appeared every
         // four seconds and re_peek_seconds meant nothing.
         _lastRevealAt = _clock.Elapsed;
+        _lastSlideAt = _clock.Elapsed; // new appearance: first slide is a full interval away
 
         _peekUntil = _clock.Elapsed + TimeSpan.FromSeconds(Math.Max(1, settings.PeekSeconds));
 

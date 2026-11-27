@@ -97,6 +97,15 @@
       <Grid.ColumnDefinitions>
         <ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/>
       </Grid.ColumnDefinitions>
+      <TextBlock Grid.Column="0" Text="Rotate rows every (s)"/>
+      <Slider x:Name="RotateSlider" Grid.Column="1" Minimum="0" Maximum="60" SmallChange="1" TickFrequency="1" IsSnapToTickEnabled="True"/>
+      <TextBlock x:Name="RotateValue" Grid.Column="2" Style="{StaticResource Value}"/>
+    </Grid>
+
+    <Grid Margin="0,4">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="160"/><ColumnDefinition Width="*"/><ColumnDefinition Width="56"/>
+      </Grid.ColumnDefinitions>
       <TextBlock Grid.Column="0" Text="Idle reveal after (s)"/>
       <Slider x:Name="IdleSlider" Grid.Column="1" Minimum="5" Maximum="300" SmallChange="5" TickFrequency="5" IsSnapToTickEnabled="True"/>
       <TextBlock x:Name="IdleValue" Grid.Column="2" Style="{StaticResource Value}"/>
@@ -113,7 +122,7 @@
 
     <TextBlock x:Name="HintText" FontSize="11" Foreground="#FF8A8A96" TextWrapping="Wrap"
                Margin="0,14,0,0"
-               Text="Re-show every 0 disables periodic reveals: the panel then only appears when you switch windows or walk away."/>
+               Text="Re-show every 0 disables periodic reveals: the panel then only appears when you switch windows or walk away. Rotate rows every 0 holds the list still while it is on screen."/>
 
     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
       <Button x:Name="ConfigButton" Content="Open config folder"/>
