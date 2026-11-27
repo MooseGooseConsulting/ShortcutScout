@@ -17,19 +17,6 @@ public sealed class Rotation
     public static long SlotFor(TimeSpan elapsed) =>
         (long)(elapsed.TotalSeconds / Slot.TotalSeconds);
 
-    /// <summary>
-    /// Rotation driven by how many times the panel has actually appeared.
-    ///
-    /// Wall-clock slots rotate while the panel is hidden, so the change is spent on
-    /// nobody — you could watch the overlay for an hour and see the same eight rows.
-    /// Counting reveals means every appearance is genuinely a different slice of the list.
-    /// </summary>
-    public static long RevealSlot(int reveals, int everyReveals = 1)
-    {
-        var every = Math.Max(1, everyReveals);
-        return Math.Max(0, reveals) / every;
-    }
-
     public IReadOnlyCollection<string> Seen => _seen;
 
     /// <summary>

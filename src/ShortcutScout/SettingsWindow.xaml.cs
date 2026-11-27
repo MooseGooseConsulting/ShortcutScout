@@ -40,14 +40,26 @@ public partial class SettingsWindow : Window
     private void Load()
     {
         ModeBox.SelectedIndex = IdlePolicy.ParseMode(S.Mode) == OverlayMode.Ambient ? 1 : 0;
-        FontSlider.Value = S.FontSize;
-        WidthSlider.Value = S.Width;
-        RowsSlider.Value = S.MaxRows;
-        PeekSlider.Value = S.PeekSeconds;
-        RePeekSlider.Value = S.RePeekSeconds;
-        IdleSlider.Value = S.IdleThresholdSeconds;
-        OpacitySlider.Value = S.ActiveOpacity;
+
+        // Config can hold values outside a slider's range (font_size 40, say). Assigning
+        // those clamps the thumb but leaves the label reading the raw number, so the next
+        // drag would silently rewrite it. Clamp the model itself: what you see is what saves.
+        S.FontSize = Fit(FontSlider, S.FontSize);
+        S.Width = Fit(WidthSlider, S.Width);
+        S.MaxRows = (int)Fit(RowsSlider, S.MaxRows);
+        S.PeekSeconds = Fit(PeekSlider, S.PeekSeconds);
+        S.RePeekSeconds = (int)Fit(RePeekSlider, S.RePeekSeconds);
+        S.IdleThresholdSeconds = (int)Fit(IdleSlider, S.IdleThresholdSeconds);
+        S.ActiveOpacity = Fit(OpacitySlider, S.ActiveOpacity);
+
         RefreshValues();
+    }
+
+    private static double Fit(Slider slider, double value)
+    {
+        var clamped = Math.Clamp(value, slider.Minimum, slider.Maximum);
+        slider.Value = clamped;
+        return clamped;
     }
 
     private void RefreshValues()

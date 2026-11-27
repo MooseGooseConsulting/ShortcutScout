@@ -43,15 +43,21 @@ agent over MCP (`ShortcutScout.exe --mcp`). All three write the same files.
 ## Reveal rules (what makes the panel appear)
 
 1. **A window comes to the front** — a different foreground window, whatever app it belongs
-   to. Rate-limited to once every 4 seconds so alt-tabbing doesn't strobe.
-2. **Nothing has been shown for `re_peek_seconds`** — the periodic reveal. Without this the
-   panel can stay hidden for an entire session during steady work.
-3. **You step away for `idle_threshold_seconds`** — stays up until you come back.
-4. **`Ctrl+Alt+S`** hides everything until pressed again.
+   to. Rate-limited to once every 4 seconds (`MinPeekGapSeconds`) so alt-tabbing doesn't strobe.
+2. **The matched app changes** — catches tab switches: Devin → ChatGPT is a different app
+   in the *same* Chrome window, so the window handle never changes.
+3. **Nothing has been shown for `re_peek_seconds`** — the periodic reveal, measured from the
+   last reveal. Without this the panel can stay hidden for an entire session during steady work.
+4. **You step away for `idle_threshold_seconds`** — stays up until you come back.
+5. **`Ctrl+Alt+S`** hides everything until pressed again.
 
-Rotation advances **once per appearance**, while the panel is off screen — so every time you
-see it, it's a different slice of the list. It does not tick on a wall clock: a 3-minute timer
-rotated while nobody was looking, which is how the list appeared never to change.
+Rotation advances **once per appearance**, so every time you see the panel it's a different
+slice of the list. It does not tick on a wall clock: the old 3-minute timer rotated while nobody
+was looking, which is how the list appeared never to change.
+
+Rotation is driven by reveals, so it only moves when the panel appears. In `ambient` mode that
+means a window switch or a periodic re-peek; with `re_peek_seconds: 0` and no window switches,
+an ambient list stays put.
 
 ## Things worth being able to vary (not all implemented)
 
@@ -78,12 +84,12 @@ Grouped by how much they'd change daily use. Implemented ones are marked.
 **Behavior**
 
 - `mode`, `peek_seconds`, `re_peek_seconds`, `idle_threshold_seconds`, `active_opacity`, `fade_*` — **implemented**
-- `rotation_every_reveals` — rotate every N appearances instead of every one (core support exists: `Rotation.RevealSlot(reveals, everyReveals)`, not yet read from config)
+- `min_peek_gap_seconds` — **implemented as a constant** (`MainWindow.MinPeekGapSeconds`, 4 s); not yet a config key
+- `rotation_every_reveals` — rotate every N appearances instead of every one (not implemented; the slot is a plain counter in `MainWindow`)
 - `hide_when_fullscreen` — don't overlay games/videos
 - `hide_when_battery` — be polite on battery
 - `pause_apps` — per-app opt-out list
 - `discovery_highlight` — how a not-yet-seen shortcut is marked (`NEW` badge, dimmer seen rows, a `+` prefix…)
-- `min_peek_gap_seconds` — the 4-second anti-strobe floor when switching windows
 - `start_with_windows` — not implemented; a shortcut in `shell:startup` is the workaround
 
 ## Why some defaults are what they are

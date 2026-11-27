@@ -50,16 +50,20 @@ public static class OverlayGeometry
         double margin = DefaultMargin, double inset = DefaultInset,
         double hysteresis = DefaultHysteresis)
     {
-        var w = Math.Min(overlay.W, Math.Max(0, work.W - inset * 2));
-        var h = Math.Min(overlay.H, Math.Max(0, work.H - inset * 2));
+        var w = overlay.W;
+        var h = overlay.H;
 
         var loX = work.X + inset;
         var hiX = Math.Max(loX, work.Right - w - inset);
         var loY = work.Y + inset;
         var hiY = Math.Max(loY, work.Bottom - h - inset);
 
-        // Already comfortably out of the cursor's way: leave it exactly where it is.
-        if (overlay.Clearance(cx, cy) >= hysteresis) return Placement.Stay(overlay);
+        // Already comfortably out of the cursor's way AND fully on screen: leave it alone.
+        // The bounds check matters after a resize: growing while docked right or bottom
+        // leaves Left/Top untouched but pushes the text past the edge, and a panel that is
+        // merely "far from the cursor" would otherwise never be corrected.
+        if (overlay.Clearance(cx, cy) >= hysteresis && FitsInside(overlay, work))
+            return Placement.Stay(overlay);
 
         var xs = new[] { loX, (loX + hiX) / 2, hiX };
         var ys = new[] { loY, (loY + hiY) / 2, hiY };
@@ -99,6 +103,12 @@ public static class OverlayGeometry
 
         return new Placement(overlay.X, overlay.Y, false);
     }
+
+    private static bool FitsInside(Rect overlay, Rect work) =>
+        overlay.X >= work.X - 0.5 &&
+        overlay.Y >= work.Y - 0.5 &&
+        overlay.Right <= work.Right + 0.5 &&
+        overlay.Bottom <= work.Bottom + 0.5;
 
     private static Placement? TryFinerSearch(
         Rect overlay, double cx, double cy, Rect work, double w, double h,

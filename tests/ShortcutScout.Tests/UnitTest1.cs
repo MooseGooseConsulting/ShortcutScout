@@ -598,15 +598,30 @@ public class Tests
     }
 
     [TestMethod]
-    public void Rotation_AdvancesOncePerReveal_NotOncePerTick()
+    public void Place_RedocksAfterThePanelGrowsPastTheEdge()
     {
-        // Rotation is counted in appearances: wall-clock slots were spent while the
-        // panel was hidden, so the list appeared never to change.
-        Assert.AreEqual(0, Rotation.RevealSlot(0));
-        Assert.AreEqual(1, Rotation.RevealSlot(1));
-        Assert.AreEqual(2, Rotation.RevealSlot(2));
-        Assert.AreEqual(1, Rotation.RevealSlot(5, everyReveals: 3));
-        Assert.AreEqual(0, Rotation.RevealSlot(-3));
+        // Resizing while docked bottom-right leaves Left/Top alone and pushes the text
+        // off screen. "Far from the cursor" alone must not count as acceptable.
+        var work = new Rect(0, 0, 1920, 1040);
+        var grown = new Rect(1500, 900, 460, 300); // right = 1960, bottom = 1200: both overflow
+
+        var p = OverlayGeometry.Place(grown, 100, 100, work);
+
+        Assert.IsTrue(p.Escaped);
+        Assert.IsTrue(p.X + 460 <= 1920 + 0.5, $"still off the right edge at {p.X}");
+        Assert.IsTrue(p.Y + 300 <= 1040 + 0.5, $"still off the bottom edge at {p.Y}");
+    }
+
+    [TestMethod]
+    public void Place_LeavesAnOnScreenPanelAlone_EvenIfItIsNotDocked()
+    {
+        var work = new Rect(0, 0, 1920, 1040);
+        var floating = new Rect(500, 300, 460, 200);
+
+        var p = OverlayGeometry.Place(floating, 1800, 1000, work);
+
+        Assert.AreEqual(500, p.X);
+        Assert.AreEqual(300, p.Y);
     }
 
     [TestMethod]
