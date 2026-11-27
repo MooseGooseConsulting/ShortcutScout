@@ -20,14 +20,11 @@ public partial class App : System.Windows.Application
     private IntPtr _hwnd;
     private long _tick;
 
-    private static string FindConfig()
-    {
-        foreach (var p in new[] { "config", Path.Combine(AppContext.BaseDirectory, "config"),
-                                  Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "config"),
-                                  @"C:\_projects\ShortcutScout\config" })
-            if (Directory.Exists(p)) return Path.GetFullPath(p);
-        return "config";
-    }
+    // Beside the exe first (an installed copy), walking up to the repo's config/ for a dev
+    // build; the working directory is only a fallback, since a Start-menu or startup-folder
+    // launch runs from wherever the shell happens to be.
+    private static string FindConfig() =>
+        ConfigLocator.Find(new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() });
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -48,6 +45,7 @@ public partial class App : System.Windows.Application
         Log($"hwnd=0x{_hwnd.ToInt64():X} source={(source != null)} toggleHotkey={okToggle} settingsHotkey={okSettings}");
 
         SetupTray();
+        ReportLoadErrors();
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _timer.Tick += (_, __) => { _tick++; _win?.Refresh(_tick); };
         _timer.Start();
@@ -122,7 +120,7 @@ public partial class App : System.Windows.Application
         var toggleItem = new WinForms.ToolStripMenuItem("Hide / Show (Ctrl+Alt+S)");
         toggleItem.Click += (_, __) => _toggle.Toggle();
         var reloadItem = new WinForms.ToolStripMenuItem("Reload config");
-        reloadItem.Click += (_, __) => { _store.Reload(); _win?.ApplySettings(); };
+        reloadItem.Click += (_, __) => { _store.Reload(); _win?.ApplySettings(); ReportLoadErrors(); };
         var exitItem = new WinForms.ToolStripMenuItem("Exit");
         exitItem.Click += (_, __) => Shutdown();
         menu.Items.Add(settingsItem);
@@ -132,6 +130,21 @@ public partial class App : System.Windows.Application
         menu.Items.Add(exitItem);
         _tray.ContextMenuStrip = menu;
         _tray.DoubleClick += (_, __) => ShowSettings();
+    }
+
+    /// <summary>
+    /// A config file that failed to parse is skipped, not fatal — but skipping it silently
+    /// looks exactly like "my edit did nothing", so say which file and why.
+    /// </summary>
+    private void ReportLoadErrors()
+    {
+        var errors = _store.LoadErrors;
+        foreach (var error in errors) Log("config: " + error);
+        if (errors.Count == 0 || _tray == null) return;
+
+        var text = string.Join(Environment.NewLine, errors.Take(3));
+        if (text.Length > 240) text = text[..240] + "…";
+        _tray.ShowBalloonTip(8000, "ShortcutScout: config problem", text, WinForms.ToolTipIcon.Warning);
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -186,6 +199,17 @@ public partial class App : System.Windows.Application
     {
         var i = Array.IndexOf(args, "--cli");
         var cmd = i >= 0 && i + 1 < args.Length ? args[i + 1] : "list";
+        try { RunCliCommand(cmd, args, i); }
+        catch (Exception ex) when (ex is ArgumentException or IOException or System.Text.Json.JsonException
+                                       or UnauthorizedAccessException)
+        {
+            // A refused app id or an unwritable file is an answer, not a crash dialog.
+            Console.WriteLine("error: " + ex.Message);
+        }
+    }
+
+    private void RunCliCommand(string cmd, string[] args, int i)
+    {
         switch (cmd)
         {
             case "list":

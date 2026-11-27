@@ -30,8 +30,8 @@ machine; use the full path in Git Bash).
 
 ```powershell
 dotnet build ShortcutScout.sln -c Release   # from the repo root
-dotnet test ShortcutScout.sln               # 60 tests, all in
-                                          # tests/ShortcutScout.Tests/UnitTest1.cs
+dotnet test ShortcutScout.sln               # MSTest, tests/ShortcutScout.Tests/ —
+                                          # one file per concern for new tests
 ```
 
 - **Kill `ShortcutScout.exe` before building** (`taskkill //IM ShortcutScout.exe /F`
