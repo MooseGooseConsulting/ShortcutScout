@@ -64,7 +64,8 @@ $bmp = New-Object System.Drawing.Bitmap $w, $ht
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $g.CopyFromScreen($r.L, $r.T, 0, 0, (New-Object System.Drawing.Size $w, $ht))
 
-$full = Join-Path (Get-Location) $Out
+# Absolute paths pass through; Join-Path would glue the working directory onto the front.
+$full = if ([IO.Path]::IsPathRooted($Out)) { $Out } else { Join-Path (Get-Location) $Out }
 New-Item -ItemType Directory -Force -Path (Split-Path $full) | Out-Null
 $bmp.Save($full, [System.Drawing.Imaging.ImageFormat]::Png)
 $g.Dispose(); $bmp.Dispose()

@@ -125,7 +125,11 @@ public partial class SettingsWindow : Window
     private void Save()
     {
         try { _store.SaveOverlay(); }
-        catch (Exception ex) { System.Windows.MessageBox.Show(this, ex.Message, "Could not save settings"); }
+        catch (Exception ex)
+        {
+            AppLog.Error("could not save settings", ex);
+            System.Windows.MessageBox.Show(this, ex.Message, "Could not save settings");
+        }
     }
 
     private void OpenConfig()
