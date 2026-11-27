@@ -1,13 +1,31 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace ShortcutScout.Core;
 
-/// <summary>Minimal MCP (stdio, JSON-RPC 2.0) handler. Pure/testable: Handle() maps one request line to one response line.</summary>
+/// <summary>
+/// Minimal MCP (stdio, JSON-RPC 2.0) handler. Pure/testable: <see cref="Handle"/> maps one
+/// request line to one response line, or to nothing when the message is a notification.
+/// </summary>
 public sealed class McpServer
 {
+    // JSON-RPC 2.0 error codes.
+    public const int ParseError = -32700;
+    public const int InvalidRequest = -32600;
+    public const int MethodNotFound = -32601;
+    public const int InvalidParams = -32602;
+    public const int InternalError = -32603;
+
+    /// <summary>
+    /// Protocol revisions this server can speak, newest last. It only offers tools with text
+    /// results, which is the same wire shape in all of them.
+    /// </summary>
+    private static readonly string[] SupportedVersions = { "2024-11-05", "2025-03-26", "2025-06-18" };
+
     private readonly ConfigStore _store;
-    // Relaxed encoder keeps keys readable for agents (Ctrl+Z, not Ctrl\u002BZ).
+
+    // Relaxed encoder keeps keys readable for agents (Ctrl+Z, not Ctrl+Z).
     private static readonly JsonSerializerOptions JsonOut = new()
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
@@ -18,63 +36,193 @@ public sealed class McpServer
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    public McpServer(ConfigStore store) => _store = store;
-
-    public string Handle(string line)
+    /// <summary>A tool-level failure: reported inside the result so the agent can read it and retry.</summary>
+    private sealed class ToolException : Exception
     {
-        using var doc = JsonDocument.Parse(line);
-        var root = doc.RootElement;
-        var id = root.TryGetProperty("id", out var idEl) ? idEl.GetRawText() : "null";
-        var method = root.TryGetProperty("method", out var m) ? (m.GetString() ?? "") : "";
-        string resultPayload;
-        try { resultPayload = Dispatch(method, root); }
-        catch (Exception ex) { return $"{{\"jsonrpc\":\"2.0\",\"id\":{id},\"error\":{{\"code\":-32000,\"message\":{JsonSerializer.Serialize(ex.Message, JsonOut)}}}}}"; }
-        return $"{{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{resultPayload}}}";
+        public ToolException(string message) : base(message) { }
     }
 
-    private string Dispatch(string method, JsonElement root)
+    /// <summary>A protocol-level failure, carrying its JSON-RPC code.</summary>
+    private sealed class RpcException : Exception
+    {
+        public int Code { get; }
+        public RpcException(int code, string message) : base(message) => Code = code;
+    }
+
+    public McpServer(ConfigStore store) => _store = store;
+
+    /// <summary>
+    /// Handle one line. Returns the response line, or <c>null</c> when nothing may be sent:
+    /// a JSON-RPC notification (no <c>id</c>) never gets a reply, not even an error. Never throws.
+    /// </summary>
+    public string? Handle(string line)
+    {
+        JsonDocument doc;
+        try { doc = JsonDocument.Parse(line); }
+        catch (JsonException ex) { return Error("null", ParseError, "parse error: " + ex.Message); }
+
+        using (doc)
+        {
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+                return Error("null", InvalidRequest, "expected a single JSON-RPC request object");
+
+            var isNotification = !root.TryGetProperty("id", out var idEl);
+            var id = isNotification ? "null" : idEl.GetRawText();
+
+            if (!root.TryGetProperty("method", out var m) || m.ValueKind != JsonValueKind.String)
+                return isNotification ? null : Error(id, InvalidRequest, "missing method");
+            var method = m.GetString() ?? "";
+
+            // Nothing a client notifies us of needs acting on (initialized, cancelled, ...).
+            if (isNotification) return null;
+
+            try
+            {
+                var result = Dispatch(method, root);
+                return $"{{\"jsonrpc\":\"2.0\",\"id\":{id},\"result\":{result.ToJsonString(JsonOut)}}}";
+            }
+            catch (RpcException ex) { return Error(id, ex.Code, ex.Message); }
+            catch (Exception ex) { return Error(id, InternalError, ex.Message); }
+        }
+    }
+
+    private static string Error(string rawId, int code, string message) =>
+        $"{{\"jsonrpc\":\"2.0\",\"id\":{rawId},\"error\":{{\"code\":{code},\"message\":{JsonSerializer.Serialize(message, JsonOut)}}}}}";
+
+    private JsonObject Dispatch(string method, JsonElement root)
     {
         switch (method)
         {
             case "initialize":
-                return "{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"shortcutscout\",\"version\":\"1.0\"}}";
-            case "notifications/initialized": return "{}";
+                return new JsonObject
+                {
+                    ["protocolVersion"] = NegotiateVersion(root),
+                    ["capabilities"] = new JsonObject { ["tools"] = new JsonObject() },
+                    ["serverInfo"] = new JsonObject { ["name"] = "shortcutscout", ["version"] = "1.0" },
+                };
+            case "ping":
+                return new JsonObject();
             case "tools/list":
-                return "{\"tools\":[" +
-                    Tool("list_apps", "List configured apps", "{}") + "," +
-                    Tool("list_shortcuts", "List shortcuts for an app", "{\"type\":\"object\",\"properties\":{\"app\":{\"type\":\"string\"}},\"required\":[\"app\"]}") + "," +
-                    Tool("add_shortcut", "Add a shortcut (keys, action, optional discovery/category)", "{\"type\":\"object\",\"properties\":{\"app\":{\"type\":\"string\"},\"keys\":{\"type\":\"string\"},\"action\":{\"type\":\"string\"},\"discovery\":{\"type\":\"boolean\"},\"category\":{\"type\":\"string\"}},\"required\":[\"app\",\"keys\",\"action\"]}") + "," +
-                    Tool("remove_shortcut", "Remove shortcut by keys", "{\"type\":\"object\",\"properties\":{\"app\":{\"type\":\"string\"},\"keys\":{\"type\":\"string\"}},\"required\":[\"app\",\"keys\"]}") + "," +
-                    Tool("reload_config", "Reload config files from disk", "{}") +
-                    "]}";
-            case "tools/call": return CallTool(root);
-            default: throw new Exception("unknown method " + method);
+                return new JsonObject
+                {
+                    ["tools"] = new JsonArray(
+                        Tool("list_apps", "List configured apps with their shortcut counts"),
+                        Tool("list_shortcuts", "List shortcuts for an app",
+                            required: new[] { "app" }, ("app", "string")),
+                        Tool("add_shortcut", "Add a shortcut (keys, action, optional discovery/category). Creates the app if it does not exist.",
+                            required: new[] { "app", "keys", "action" },
+                            ("app", "string"), ("keys", "string"), ("action", "string"), ("discovery", "boolean"), ("category", "string")),
+                        Tool("remove_shortcut", "Remove every shortcut with these keys from an app",
+                            required: new[] { "app", "keys" }, ("app", "string"), ("keys", "string")),
+                        Tool("reload_config", "Reload config files from disk and report any that failed to parse")),
+                };
+            case "tools/call":
+                return CallTool(root);
+            default:
+                throw new RpcException(MethodNotFound, "unknown method " + method);
         }
     }
 
-    private string CallTool(JsonElement root)
+    /// <summary>Echo the client's revision when we speak it; otherwise offer our newest.</summary>
+    private static string NegotiateVersion(JsonElement root)
     {
-        var p = root.TryGetProperty("params", out var pr) ? pr : default;
-        var name = p.TryGetProperty("name", out var n) ? n.GetString() : "";
-        var args = p.TryGetProperty("arguments", out var a) ? a : default;
-        string Str(string k) => args.TryGetProperty(k, out var v) ? v.GetString() ?? "" : "";
-        object data = name switch
-        {
-            "list_apps" => _store.Config.Apps.Select(x => new { id = x.Id, name = x.Name, count = x.Shortcuts.Count }).ToArray(),
-            "list_shortcuts" => (_store.Config.Apps.FirstOrDefault(x => x.Id == Str("app"))?.Shortcuts
-                ?? throw new Exception("app not found: " + Str("app"))).ToArray(),
-            "add_shortcut" => new { ok = _store.AddShortcut(Str("app"), new Shortcut(Str("keys"), Str("action"),
-                args.TryGetProperty("discovery", out var d) && d.GetBoolean(),
-                args.TryGetProperty("category", out var c) ? c.GetString() ?? "General" : "General")) },
-            "remove_shortcut" => new { ok = _store.RemoveShortcut(Str("app"), Str("keys")) },
-            "reload_config" => RunReload(),
-            _ => throw new Exception("unknown tool " + name),
-        };
-        var text = JsonSerializer.Serialize(data, PrettyOut);
-        return "{\"content\":[{\"type\":\"text\",\"text\":" + JsonSerializer.Serialize(text, JsonOut) + "}]}";
+        if (root.TryGetProperty("params", out var p) && p.ValueKind == JsonValueKind.Object
+            && p.TryGetProperty("protocolVersion", out var v) && v.ValueKind == JsonValueKind.String
+            && SupportedVersions.Contains(v.GetString()))
+            return v.GetString()!;
+        return SupportedVersions[^1];
     }
 
-    private object RunReload() { _store.Reload(); return new { ok = true, apps = _store.Config.Apps.Count }; }
-    private static string Tool(string name, string desc, string schema) =>
-        $"{{\"name\":\"{name}\",\"description\":\"{desc}\",\"inputSchema\":{schema}}}";
+    private JsonObject CallTool(JsonElement root)
+    {
+        if (!root.TryGetProperty("params", out var p) || p.ValueKind != JsonValueKind.Object)
+            throw new RpcException(InvalidParams, "tools/call needs params");
+        var name = p.TryGetProperty("name", out var n) && n.ValueKind == JsonValueKind.String ? n.GetString()! : "";
+        var args = p.TryGetProperty("arguments", out var a) && a.ValueKind == JsonValueKind.Object ? a : default;
+
+        string Str(string key)
+        {
+            if (args.ValueKind != JsonValueKind.Object || !args.TryGetProperty(key, out var v)) return "";
+            return v.ValueKind == JsonValueKind.String
+                ? v.GetString() ?? ""
+                : throw new ToolException($"'{key}' must be a string");
+        }
+        string Required(string key) =>
+            Str(key) is { Length: > 0 } value && !string.IsNullOrWhiteSpace(value)
+                ? value
+                : throw new ToolException($"'{key}' is required");
+        bool Flag(string key)
+        {
+            if (args.ValueKind != JsonValueKind.Object || !args.TryGetProperty(key, out var v)) return false;
+            return v.ValueKind switch
+            {
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                _ => throw new ToolException($"'{key}' must be true or false"),
+            };
+        }
+
+        object data;
+        try
+        {
+            data = name switch
+            {
+                "list_apps" => _store.Config.Apps.Select(x => new { id = x.Id, name = x.Name, count = x.Shortcuts.Count }).ToArray(),
+                "list_shortcuts" => (_store.Config.Apps.FirstOrDefault(x => x.Id == Required("app"))?.Shortcuts
+                    ?? throw new ToolException("app not found: " + Str("app"))).ToArray(),
+                "add_shortcut" => new
+                {
+                    ok = _store.AddShortcut(Required("app"), new Shortcut(
+                        Required("keys"), Required("action"), Flag("discovery"),
+                        Str("category") is { Length: > 0 } category ? category : "General"))
+                },
+                "remove_shortcut" => new { ok = _store.RemoveShortcut(Required("app"), Required("keys")) },
+                "reload_config" => RunReload(),
+                _ => throw new RpcException(InvalidParams, "unknown tool " + name),
+            };
+        }
+        catch (Exception ex) when (ex is ToolException or ArgumentException or IOException
+                                       or UnauthorizedAccessException or JsonException)
+        {
+            // The call was well-formed but could not be carried out. MCP reports that inside
+            // the result (isError) so the model sees the reason, rather than as a protocol error.
+            return TextResult(ex.Message, isError: true);
+        }
+
+        return TextResult(JsonSerializer.Serialize(data, PrettyOut), isError: false);
+    }
+
+    private static JsonObject TextResult(string text, bool isError)
+    {
+        var result = new JsonObject
+        {
+            ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = text }),
+        };
+        if (isError) result["isError"] = true;
+        return result;
+    }
+
+    private object RunReload()
+    {
+        _store.Reload();
+        return new { ok = _store.LoadErrors.Count == 0, apps = _store.Config.Apps.Count, errors = _store.LoadErrors };
+    }
+
+    /// <summary>
+    /// <c>inputSchema</c> must be a JSON Schema of type <c>object</c> even for a tool with no
+    /// arguments — a bare <c>{}</c> is rejected by clients that validate tool definitions.
+    /// </summary>
+    private static JsonNode Tool(string name, string description, string[]? required = null,
+        params (string Name, string Type)[] properties)
+    {
+        var props = new JsonObject();
+        foreach (var (propName, type) in properties) props[propName] = new JsonObject { ["type"] = type };
+
+        var schema = new JsonObject { ["type"] = "object", ["properties"] = props };
+        if (required is { Length: > 0 })
+            schema["required"] = new JsonArray(required.Select(r => (JsonNode)r!).ToArray());
+
+        return new JsonObject { ["name"] = name, ["description"] = description, ["inputSchema"] = schema };
+    }
 }

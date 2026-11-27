@@ -186,12 +186,19 @@ public partial class App : System.Windows.Application
     private void RunMcp()
     {
         var server = new McpServer(_store);
+
+        // MCP stdio is UTF-8, one message per LF-terminated line. A WinExe's redirected
+        // console streams default to the OEM code page and CRLF, so wrap the raw handles.
+        var utf8 = new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+        using var input = new StreamReader(Console.OpenStandardInput(), utf8);
+        using var output = new StreamWriter(Console.OpenStandardOutput(), utf8) { NewLine = "\n", AutoFlush = true };
+
         string? line;
-        while ((line = Console.In.ReadLine()) != null)
+        while ((line = input.ReadLine()) != null)
         {
             if (string.IsNullOrWhiteSpace(line)) continue;
-            try { Console.Out.WriteLine(server.Handle(line)); Console.Out.Flush(); }
-            catch (Exception ex) { Console.Error.WriteLine(ex.Message); }
+            var response = server.Handle(line); // null for notifications: nothing may be sent
+            if (response != null) output.WriteLine(response);
         }
     }
 
