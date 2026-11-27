@@ -62,7 +62,7 @@ line spacing, key/action colours, halo strength, dock corner and placement strat
   WPF build break before a push does.
 - **No VM lane for the live desktop checks.** `tools/verify_placement.ps1`,
   `tools/verify_runaway.ps1` and `tools/measure_idle.ps1` opt in via
-  `-AllowCursorControl` (see `CONFIG.md`/`AGENTS.md`), but there is still nowhere
+  `-AllowCursorControl` (see `README.md`/`AGENTS.md`), but there is still nowhere
   safe to run them: they need a disposable Windows VM with a pinned DPI and work
   area, so a sweep is reproducible and never lands on somebody's working desktop.
   Until that exists they stay unrun, and the read-only substitute is the trace,
