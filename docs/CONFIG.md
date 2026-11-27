@@ -11,6 +11,29 @@ config/
 Edit by hand, through the settings window (**Ctrl+Alt+O** or the tray menu), or with an
 agent over MCP (`ShortcutScout.exe --mcp`). All three write the same files.
 
+**Where the folder is found.** `config/` beside the exe, or the nearest one walking up from
+it (which is how a dev build under `src/ShortcutScout/bin/…` reaches the repo's `config/`),
+then the same search from the working directory. A folder only counts if it holds
+`shortcuts.json` or `apps/`, so an unrelated `config/` directory is never adopted.
+
+**A file that won't parse is skipped, not fatal.** The tray shows a balloon naming the file
+and the parse error, on startup and on *Reload config*. If `shortcuts.json` itself is broken,
+the running overlay keeps the settings from the last good load instead of snapping back to
+defaults; the settings window refuses to save over it until it loads again — that includes a
+file that is valid JSON but the wrong shape (`"width": "460"`, an array at the top level).
+The CLI prints the same errors as `warning:` lines on stderr.
+
+**Where an edit is written.** An app that lives inside `shortcuts.json` (the shipped `global`
+fallback) is updated there; every other app is `apps/<id>.json`. An id is also a file name, so
+it must be a plain name — no slashes, colons, or leading/trailing dots, and not a Windows
+device name (`con`, `nul`, `com1`…). If two files define the same id, the first one loaded wins
+and the other is reported as ignored. An edit is applied to the files as they are on disk at
+that moment, so hand edits made while an MCP server is running are kept. While `shortcuts.json`
+is unreadable, an edit that would create a new `apps/<id>.json` is refused, because the id
+might already be defined in the file that cannot be read. Likewise an `apps/<id>.json` that
+exists but did not load (a hand edit in progress, or another id inside it) is never
+overwritten by an add.
+
 ## Overlay settings (`config/shortcuts.json` → `overlay`)
 
 | Key | Default | What it does |
