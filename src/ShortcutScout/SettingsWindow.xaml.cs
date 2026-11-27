@@ -81,7 +81,9 @@ public partial class SettingsWindow : Window
         PeekValue.Text = $"{PeekSlider.Value:0}s";
         RePeekValue.Text = RePeekSlider.Value == 0 ? "off" : $"{RePeekSlider.Value:0}s";
         RotateValue.Text = RotateSlider.Value == 0 ? "off" : $"{RotateSlider.Value:0}s";
-        IdleValue.Text = $"{IdleSlider.Value:0}s";
+        // 0 turns the idle reveal off (IdlePolicy.IsIdle). With a minimum of 5 the slider showed
+        // a saved 0 as "5s" while the reveal stayed off, and no click could turn it back on.
+        IdleValue.Text = IdleSlider.Value == 0 ? "off" : $"{IdleSlider.Value:0}s";
         OpacityValue.Text = $"{OpacitySlider.Value:0.00}";
     }
 
