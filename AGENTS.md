@@ -50,12 +50,15 @@ dotnet test ShortcutScout.sln               # 60 tests, all in
   `%TEMP%\shortcutscout-trace.log`. `SHORTCUTSCOUT_FORCE_IDLE=1` pins the idle
   reveal on for screenshots/tuning. Always kill the app after a traced run.
 - **Never run `tools/verify_placement.ps1`, `tools/verify_runaway.ps1`, or
-  `tools/measure_idle.ps1` without the user's explicit permission** — they call
-  `SetCursorPos` and move the user's real mouse pointer, which hijacks their work.
+  `tools/measure_idle.ps1` without the user's explicit permission** — they move or
+  inject the user's real mouse input (`SetCursorPos` in the first two, `mouse_event`
+  in `measure_idle.ps1`), which hijacks their work.
   Prefer read-only verification: user moves the mouse, agent reads the trace or the
   window rect (`tools/window_state.ps1`).
-- Display is 200% DPI: scripts report physical pixels; the app positions in DIPs
-  (divide by 2).
+- Display is 200% DPI. The app positions in DIPs, but what a script reports depends
+  on the host's DPI awareness: `verify_placement.ps1` calls `SetProcessDPIAware`
+  (physical pixels, divide by 2 for DIPs), while `window_state.ps1` does not, so in a
+  DPI-unaware PowerShell host its rects may already be scaled — don't divide blindly.
 
 ## Git / PRs
 
