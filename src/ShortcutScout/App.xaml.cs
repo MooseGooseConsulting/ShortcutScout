@@ -23,6 +23,9 @@ public partial class App : System.Windows.Application
     private readonly ErrorBudget _errorBudget = new();
     private readonly Stopwatch _uptime = Stopwatch.StartNew();
 
+    /// <summary>The overlay, tray and timer are up: from here an error can be survived.</summary>
+    private bool _started;
+
     // Beside the exe first (an installed copy), walking up to the repo's config/ for a dev
     // build; the working directory is only a fallback, since a Start-menu or startup-folder
     // launch runs from wherever the shell happens to be.
@@ -80,9 +83,17 @@ public partial class App : System.Windows.Application
                 $"{taken} is taken by another program. Use this tray icon instead.", WinForms.ToolTipIcon.Warning);
         }
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _timer.Tick += (_, __) => { _tick++; _win?.Refresh(_tick); };
+        _timer.Tick += (_, __) =>
+        {
+            // Caught here, not left to the dispatcher handler: DispatcherTimer re-arms only
+            // after Tick returns normally, so an exception that escaped was "survived" by an
+            // overlay whose timer never fired again — frozen, with the tray still alive.
+            try { _tick++; _win?.Refresh(_tick); }
+            catch (Exception ex) { SurviveOrStop("a tick failed", ex); }
+        };
         _timer.Start();
         _win.Refresh(0);
+        _started = true;
     }
 
     private IntPtr HotkeyHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -137,16 +148,19 @@ public partial class App : System.Windows.Application
     {
         DispatcherUnhandledException += (_, args) =>
         {
-            AppLog.Error("unhandled exception on the UI thread", args.Exception);
             args.Handled = true;
 
-            // One bad tick is survivable; the same failure twice a second is not.
-            if (_errorBudget.Absorb(_uptime.Elapsed)) return;
+            // Nothing to carry on with until the overlay is up — and --mcp, --cli and --sample
+            // never get there. Surviving a startup failure left a process with no window, no
+            // tray and no way out (holding the single-instance mutex, in the overlay's case).
+            if (!_started)
+            {
+                AppLog.Error("startup failed", args.Exception);
+                Shutdown(1);
+                return;
+            }
 
-            AppLog.Error($"{_errorBudget.MaxErrors} errors within {_errorBudget.Window.TotalSeconds:0}s; shutting down");
-            _tray?.ShowBalloonTip(10000, "ShortcutScout stopped",
-                "It kept hitting errors. See " + AppLog.EventLogPath, WinForms.ToolTipIcon.Error);
-            Shutdown(1);
+            SurviveOrStop("unhandled exception on the UI thread", args.Exception);
         };
 
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
@@ -157,6 +171,20 @@ public partial class App : System.Windows.Application
             AppLog.Error("unobserved task exception", args.Exception);
             args.SetObserved();
         };
+    }
+
+    /// <summary>Log an error the running overlay can outlive, unless they keep coming.</summary>
+    private void SurviveOrStop(string what, Exception ex)
+    {
+        AppLog.Error(what, ex);
+
+        // One bad tick is survivable; the same failure twice a second is not.
+        if (_errorBudget.Absorb(_uptime.Elapsed)) return;
+
+        AppLog.Error($"{_errorBudget.MaxErrors} errors within {_errorBudget.Window.TotalSeconds:0}s; shutting down");
+        _tray?.ShowBalloonTip(10000, "ShortcutScout stopped",
+            "It kept hitting errors. See " + AppLog.EventLogPath, WinForms.ToolTipIcon.Error);
+        Shutdown(1);
     }
 
     private void OpenFolder(string path)
@@ -244,16 +272,14 @@ public partial class App : System.Windows.Application
     private void RunSample(string[] args)
     {
         var i = Array.IndexOf(args, "--sample");
-        if (i + 4 >= args.Length)
+        // A typo ("70O") is a usage error, not an exception.
+        if (i + 4 >= args.Length
+            || !int.TryParse(args[i + 1], out var x) || !int.TryParse(args[i + 2], out var y)
+            || !int.TryParse(args[i + 3], out var w) || !int.TryParse(args[i + 4], out var h))
         {
             Console.WriteLine("usage: --sample <x> <y> <w> <h>");
             return;
         }
-
-        var x = int.Parse(args[i + 1]);
-        var y = int.Parse(args[i + 2]);
-        var w = int.Parse(args[i + 3]);
-        var h = int.Parse(args[i + 4]);
 
         var stats = BackdropSampler.SampleRect(x, y, w, h);
         var theme = BackdropAdaptation.ThemeFor(stats);
