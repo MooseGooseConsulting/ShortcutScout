@@ -187,7 +187,19 @@ These three **move the real mouse pointer**, so each refuses to run without `-Al
 - `capture_overlay.ps1` — DPI-aware crop of just the overlay
 - `capture_screen.ps1` — full desktop for diagnosing placement
 
-Set `SHORTCUTSCOUT_TRACE=1` to log cursor/placement/idle/opacity each tick to `%TEMP%\shortcutscout-trace.log`. Stalls are logged as `STALL tick gap ...ms`, which is how the sampling stutter was found and fixed.
+### Logs
+
+**Event log — always on.** `%LOCALAPPDATA%\ShortcutScout\logs\shortcutscout.log` (tray menu → *Open log folder*). A few lines per session plus one per reveal: startup (version, config folder, app count), every reveal with its reason (`window change` / `app change` / `re-peek` / `idle` / `ambient`), hide/show, config files that failed to parse, a hotkey another program already owns, and any unhandled exception with its stack. Capped at 1 MB with one backup (`.log.1`). This is the file to read when the panel "never appears" or the app is simply gone.
+
+```
+2026-11-27 00:22:30.138 INFO  starting v1.0.0.0 pid=3340 config='…\config' apps=6 mode=peek trace=off
+2026-11-27 00:22:30.535 WARN  could not register Ctrl+Alt+S and Ctrl+Alt+O: already in use by another program
+2026-11-27 00:22:30.542 INFO  reveal: window change app='chrome' slot=1 for 6s
+```
+
+**Trace — opt in.** Set `SHORTCUTSCOUT_TRACE=1` to also log cursor/placement/idle/opacity on every tick to `%TEMP%\shortcutscout-trace.log` (capped at 20 MB with one backup; event-log lines are mirrored into it). Stalls are logged as `STALL tick gap ...ms`, which is how the sampling stutter was found and fixed.
+
+**When something throws.** An exception on the UI thread is logged and the overlay keeps running; five within a minute means it is not transient, so the app logs that, shows a tray balloon pointing at the log, and exits. Only one overlay runs per session — a second copy logs that and exits instead of drawing a second panel and fighting over the hotkeys.
 
 Set `SHORTCUTSCOUT_FORCE_IDLE=1` to make the idle appearance reproducible — any real mouse movement resets the Windows idle timer, so this is the only reliable way to screenshot or tune the bright state.
 

@@ -75,8 +75,10 @@ public partial class MainWindow : Window
     /// <summary>Set when the current peek already advanced the rotation.</summary>
     private bool _peekCountedRotation;
 
-    private static readonly bool Tracing =
-        Environment.GetEnvironmentVariable("SHORTCUTSCOUT_TRACE") == "1";
+    private static bool Tracing => AppLog.Tracing;
+
+    /// <summary>Why the reveal that began on this tick began, when a peek started it.</summary>
+    private string? _peekReasonThisTick;
 
     /// <summary>
     /// Debug hook: pretend the user has stepped away. Real input can't be faked
@@ -146,6 +148,7 @@ public partial class MainWindow : Window
         }
 
         var settings = Settings;
+        _peekReasonThisTick = null;
 
         // Triggers first: StartPeek inside here sets `_peekUntil` and advances the rotation
         // slot. Computing opacity before it meant a peek that began on this tick was applied
@@ -166,6 +169,21 @@ public partial class MainWindow : Window
 
         _rotationSlot = tickState.RotationSlot;
         _peekCountedRotation = tickState.PeekCountedRotation;
+
+        // One line per reveal, with its reason, in the always-on log. This is the line that
+        // answers "why did it (not) appear?" — it must not depend on tracing having been on.
+        if (_peekReasonThisTick != null)
+        {
+            AppLog.Info($"reveal: {_peekReasonThisTick} app='{app?.Id}' slot={_rotationSlot} " +
+                        $"for {settings.PeekSeconds:0.#}s{(tickState.FreshAppearance ? "" : " (already visible)")}");
+        }
+        else if (tickState.FreshAppearance)
+        {
+            var why = IdlePolicy.IsIdle(idle, settings.IdleThresholdSeconds) ? $"idle {(ForceIdle ? "forced" : idle + "s")}"
+                : peekRemaining > 0 ? "un-hidden during a peek"
+                : "ambient";
+            AppLog.Info($"reveal: {why} app='{app?.Id}' slot={_rotationSlot}");
+        }
 
         // The slide clock restarts on a fresh appearance (so rows never change the instant the
         // panel arrives) and on every step; `Decide` owns both decisions so they stay testable.
@@ -249,9 +267,10 @@ public partial class MainWindow : Window
                     $"blur={t.HaloBlur:0.0} sampleMs={elapsedMs:0.0}");
             }
         }
-        catch
+        catch (Exception ex)
         {
             // Sampling is best-effort; never let it disturb the overlay.
+            AppLog.Trace("backdrop sample failed: " + ex.Message);
         }
         finally
         {
@@ -383,6 +402,7 @@ public partial class MainWindow : Window
 
         // `appId` is the app being revealed; `_lastAppId` is still the previous one here.
         if (Tracing) Log($"peek started for '{appId}' ({reason}) slot={_rotationSlot} for {settings.PeekSeconds}s");
+        _peekReasonThisTick = reason;
         return true;
     }
 
@@ -476,16 +496,8 @@ public partial class MainWindow : Window
         }
     }
 
-    private static void Log(string message)
-    {
-        try
-        {
-            File.AppendAllText(
-                Path.Combine(Path.GetTempPath(), "shortcutscout-trace.log"),
-                $"{DateTime.Now:HH:mm:ss.fff} {message}{Environment.NewLine}");
-        }
-        catch { /* tracing must never break the overlay */ }
-    }
+    /// <summary>Per-tick trace line; capped and a no-op unless SHORTCUTSCOUT_TRACE=1.</summary>
+    private static void Log(string message) => AppLog.Trace(message);
 }
 
 internal static class ForegroundReader
