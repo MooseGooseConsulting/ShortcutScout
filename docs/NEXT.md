@@ -56,10 +56,14 @@ line spacing, key/action colours, halo strength, dock corner and placement strat
 
 ## 7. Engineering
 
-- **Tests are one 600-line file.** Split by concern (Matcher / IdlePolicy / Geometry / Rotation
-  / Config / Mcp) so failures name themselves. No behaviour change.
-- **No CI.** A `windows-latest` workflow running `dotnet test` is ~15 lines and would catch a
-  WPF build break before a push does.
+- **Nothing exercises the window itself.** Every test is against `ShortcutScout.Core`; the WPF
+  layer (`MainWindow`, `App`, the settings window) is covered only by live runs. The crash
+  handlers in particular have never been seen firing — there is no way to make a tick throw
+  without a test hook. A `SHORTCUTSCOUT_FAULT=tick` debug switch, in the spirit of
+  `SHORTCUTSCOUT_FORCE_IDLE`, would let a live run prove the log-then-give-up path.
+- **Near-duplicate test classes.** The split left `ConfigTests`/`ConfigStoreTests`,
+  `RevealPolicyTests`/`RevealRulesTests` and `RotationSlotTests`/`RotationTests` side by side
+  (old tests moved verbatim, new ones added beside them). Merge each pair when next touched.
 - **No VM lane for the live desktop checks.** `tools/verify_placement.ps1`,
   `tools/verify_runaway.ps1` and `tools/measure_idle.ps1` opt in via
   `-AllowCursorControl` (see `README.md`/`AGENTS.md`), but there is still nowhere
@@ -80,3 +84,49 @@ line spacing, key/action colours, halo strength, dock corner and placement strat
   server or the config files.
 - **Devin/ChatGPT detection** — depends on the window title still containing their domain; a
   site rename breaks it until `title_contains` is updated.
+
+## 9. Found in the November 2026 review, not fixed
+
+Small, real, and left alone because none of them bites in the shipped configs.
+
+- **A negative `priority` can never match.** `Matcher.Score` folds priority into one integer
+  (`priority * 1_000_000 + kind`), and `Match` skips scores `<= 0`. So `priority: -1` — the
+  natural way to say "only if nothing else matches" — silently disables the app. Compare
+  `(priority, kind, needle)` as a tuple instead.
+- **A pure-black backdrop reads as "no sample".** `BackdropStats.Empty` is `(0,0,0,0)`, which
+  is also what a black, perfectly flat screen measures as, so that sample is discarded and
+  the previous halo weight sticks. Make "no sample" a nullable instead of a magic value.
+- **Ambient mode never samples the backdrop.** Sampling only runs on a tick where the panel
+  is faded out (`Refresh`: `Target <= 0.001`), and in `ambient` it never is, so a session
+  started in `ambient` keeps the default halo — there is no first measurement to keep.
+- **The settings window goes stale after *Reload config*.** The model is re-read, but the
+  sliders keep showing the values from when the window opened.
+- **`.exe` is stripped anywhere in a name**, not just at the end (`Matcher.Norm`), so
+  `my.executor` and `mycutor` compare equal. Harmless today; `EndsWith` is the fix.
+
+## 10. Feature ideas from the same review
+
+Ordered by value for the effort.
+
+1. **Let an agent tune and debug the overlay over MCP.** The server can edit shortcuts but
+   cannot read or change `overlay` settings, and cannot say what the overlay currently thinks
+   is focused. `get_settings` / `update_settings` and a `match_window(title, process)` tool
+   (pure — it is just `Matcher.Match`) would let an agent answer "why is it showing Chrome's
+   list on this tab?" without a human reading the trace.
+2. **Remember what you have already been shown.** `Rotation`'s seen-set lives in memory, so
+   every restart begins discovery again from the top. Persisting it (a small JSON beside the
+   log) is what makes item 1 of this file — the unseen cue — mean "new to *you*", not "new
+   since launch".
+3. **`--cli match`** — print the foreground window's title/process and every app's score.
+   The same question as the MCP tool, for a human at a terminal; today the only way to see a
+   match decision is to infer it from which rows appear.
+4. **Import shortcuts instead of typing them.** VS Code's `keybindings.json`, a browser
+   extension's command list, or "ask an agent to read the app's docs and call `add_shortcut`"
+   — a `tools/import_*.ps1` or an MCP prompt template. The five shipped apps are the ceiling
+   until adding a sixth is cheaper than hand-writing JSON.
+5. **A "learned it" action.** Discovery rows rotate forever. A hotkey or tray action that
+   retires the rows currently on screen ("I know these now") turns the overlay from a
+   reminder into something that finishes teaching — it needs the persisted seen-set first.
+6. **Start with Windows as a tray toggle** (an `HKCU\…\Run` value) rather than the manual
+   `shell:startup` shortcut in section 6; with the single-instance guard in place a double
+   launch is now harmless.
