@@ -53,10 +53,15 @@ public static class OverlayGeometry
         var w = overlay.W;
         var h = overlay.H;
 
-        var loX = work.X + inset;
-        var hiX = Math.Max(loX, work.Right - w - inset);
-        var loY = work.Y + inset;
-        var hiY = Math.Max(loY, work.Bottom - h - inset);
+        // A panel nearly as wide (or tall) as the work area can't honour the inset on both
+        // sides. Shrink the inset to what actually fits instead of docking it off screen.
+        var insetX = Math.Clamp(inset, 0, Math.Max(0, (work.W - w) / 2));
+        var insetY = Math.Clamp(inset, 0, Math.Max(0, (work.H - h) / 2));
+
+        var loX = work.X + insetX;
+        var hiX = Math.Max(loX, work.Right - w - insetX);
+        var loY = work.Y + insetY;
+        var hiY = Math.Max(loY, work.Bottom - h - insetY);
 
         // Already comfortably out of the cursor's way AND fully on screen: leave it alone.
         // The bounds check matters after a resize: growing while docked right or bottom
@@ -114,10 +119,13 @@ public static class OverlayGeometry
         Rect overlay, double cx, double cy, Rect work, double w, double h,
         double margin, double inset)
     {
-        var loX = work.X + inset;
-        var hiX = Math.Max(loX, work.Right - w - inset);
-        var loY = work.Y + inset;
-        var hiY = Math.Max(loY, work.Bottom - h - inset);
+        var insetX = Math.Clamp(inset, 0, Math.Max(0, (work.W - w) / 2));
+        var insetY = Math.Clamp(inset, 0, Math.Max(0, (work.H - h) / 2));
+
+        var loX = work.X + insetX;
+        var hiX = Math.Max(loX, work.Right - w - insetX);
+        var loY = work.Y + insetY;
+        var hiY = Math.Max(loY, work.Bottom - h - insetY);
 
         (double X, double Y)? best = null;
         var bestClearance = double.MinValue;

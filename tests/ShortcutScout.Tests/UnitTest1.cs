@@ -638,6 +638,22 @@ public class Tests
     }
 
     [TestMethod]
+    public void Place_KeepsAVeryWidePanelOnScreen_ByShrinkingTheInset()
+    {
+        // A panel as wide as the work area can't honour a 20px inset on both sides; docking
+        // it at the inset would report success while the right edge overflowed.
+        var work = new Rect(0, 0, 800, 600);
+        var wide = new Rect(0, 0, 800, 200);
+
+        var p = OverlayGeometry.Place(wide, 400, 300, work);
+
+        Assert.IsTrue(p.Escaped);
+        Assert.IsTrue(p.X >= -0.5, $"off the left edge at {p.X}");
+        Assert.IsTrue(p.X + 800 <= 800 + 0.5, $"off the right edge at {p.X}");
+        Assert.IsTrue(p.Y + 200 <= 600 + 0.5, $"off the bottom edge at {p.Y}");
+    }
+
+    [TestMethod]
     public void Place_LeavesAnOnScreenPanelAlone_EvenIfItIsNotDocked()
     {
         var work = new Rect(0, 0, 1920, 1040);

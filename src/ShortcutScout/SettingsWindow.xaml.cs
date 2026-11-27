@@ -18,6 +18,9 @@ public partial class SettingsWindow : Window
     private readonly DispatcherTimer _saveDebounce;
     private bool _ready;
 
+    /// <summary>Only write the file when something was actually changed.</summary>
+    private bool _dirty;
+
     public SettingsWindow(ConfigStore store, Action onChanged)
     {
         InitializeComponent();
@@ -44,33 +47,39 @@ public partial class SettingsWindow : Window
         // Config can hold values outside a slider's range (font_size 40, say). Assigning
         // those clamps the thumb but leaves the label reading the raw number, so the next
         // drag would silently rewrite it. Clamp the model itself: what you see is what saves.
-        S.FontSize = Fit(FontSlider, S.FontSize);
-        S.Width = Fit(WidthSlider, S.Width);
-        S.MaxRows = (int)Fit(RowsSlider, S.MaxRows);
-        S.PeekSeconds = Fit(PeekSlider, S.PeekSeconds);
-        S.RePeekSeconds = (int)Fit(RePeekSlider, S.RePeekSeconds);
-        S.IdleThresholdSeconds = (int)Fit(IdleSlider, S.IdleThresholdSeconds);
-        S.ActiveOpacity = Fit(OpacitySlider, S.ActiveOpacity);
+        Show(FontSlider, S.FontSize);
+        Show(WidthSlider, S.Width);
+        Show(RowsSlider, S.MaxRows);
+        Show(PeekSlider, S.PeekSeconds);
+        Show(RePeekSlider, S.RePeekSeconds);
+        Show(IdleSlider, S.IdleThresholdSeconds);
+        Show(OpacitySlider, S.ActiveOpacity);
 
         RefreshValues();
     }
 
-    private static double Fit(Slider slider, double value)
-    {
-        var clamped = Math.Clamp(value, slider.Minimum, slider.Maximum);
-        slider.Value = clamped;
-        return clamped;
-    }
+    /// <summary>
+    /// Put a config value on a slider without touching the config.
+    ///
+    /// Clamping writes back only when the user actually drags: opening this window must not
+    /// silently rewrite a hand-edited value that sits outside the slider's range.
+    /// </summary>
+    private static void Show(Slider slider, double value) =>
+        slider.Value = Math.Clamp(value, slider.Minimum, slider.Maximum);
 
+    /// <summary>
+    /// Labels read the sliders, not the model: otherwise a value outside the slider's range
+    /// shows a number the thumb can't reach, and the two disagree about what would be saved.
+    /// </summary>
     private void RefreshValues()
     {
-        FontValue.Text = $"{S.FontSize:0}";
-        WidthValue.Text = $"{S.Width:0}";
-        RowsValue.Text = $"{S.MaxRows:0}";
-        PeekValue.Text = $"{S.PeekSeconds:0}s";
-        RePeekValue.Text = S.RePeekSeconds == 0 ? "off" : $"{S.RePeekSeconds:0}s";
-        IdleValue.Text = $"{S.IdleThresholdSeconds:0}s";
-        OpacityValue.Text = $"{S.ActiveOpacity:0.00}";
+        FontValue.Text = $"{FontSlider.Value:0}";
+        WidthValue.Text = $"{WidthSlider.Value:0}";
+        RowsValue.Text = $"{RowsSlider.Value:0}";
+        PeekValue.Text = $"{PeekSlider.Value:0}s";
+        RePeekValue.Text = RePeekSlider.Value == 0 ? "off" : $"{RePeekSlider.Value:0}s";
+        IdleValue.Text = $"{IdleSlider.Value:0}s";
+        OpacityValue.Text = $"{OpacitySlider.Value:0.00}";
     }
 
     private void Wire()
@@ -102,6 +111,7 @@ public partial class SettingsWindow : Window
 
     private void AfterChange()
     {
+        _dirty = true;
         RefreshValues();
         _onChanged();               // apply to the live overlay immediately
         _saveDebounce.Stop();
@@ -123,7 +133,7 @@ public partial class SettingsWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _saveDebounce.Stop();
-        Save(); // never lose the last drag
+        if (_dirty) Save(); // never lose the last drag, but never rewrite untouched config
         base.OnClosed(e);
     }
 }

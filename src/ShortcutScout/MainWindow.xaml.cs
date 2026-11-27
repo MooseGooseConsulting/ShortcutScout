@@ -231,25 +231,35 @@ public partial class MainWindow : Window
 
         // While explicitly hidden (Ctrl+Alt+S) a switch stays *pending*: consuming it would
         // swallow the change, so un-hiding would show nothing until an unrelated trigger.
-        var window = RevealPolicy.ObserveWindow(_lastWindowKey, hwnd.ToInt64(), _toggle.Hidden);
-        _lastWindowKey = window.WindowKey;
+        var windowKey = hwnd.ToInt64();
+        var window = RevealPolicy.ObserveWindow(_lastWindowKey, windowKey, _toggle.Hidden);
         var windowChanged = window.Changed;
 
         // Title-matched apps are detected per *tab*, not per window: switching from Devin
         // to ChatGPT inside the same Chrome window changes the app but not the handle, so
         // an app change has to stay a reveal trigger in its own right.
         var appChanged = RevealPolicy.ObserveAppChange(_lastAppId, appId, _toggle.Hidden);
-        if (!_toggle.Hidden) _lastAppId = appId;
 
         // Decide the reveal BEFORE building rows: StartPeek advances the rotation slot, so
         // the slice that appears is the new one instead of swapping a tick later.
+        var triggered = windowChanged || appChanged;
+        var started = false;
         if (app is { Shortcuts.Count: > 0 } && !_toggle.Hidden)
         {
-            if (windowChanged) StartPeek(settings, "window change");
-            else if (appChanged) StartPeek(settings, "app change");
+            if (windowChanged) started = StartPeek(settings, "window change");
+            else if (appChanged) started = StartPeek(settings, "app change");
             else if (IdlePolicy.RePeekDue(settings, _toggle.Hidden,
                          (_clock.Elapsed - _lastRevealAt).TotalSeconds))
-                StartPeek(settings, "re-peek");
+                started = StartPeek(settings, "re-peek");
+        }
+
+        // A trigger that the anti-strobe floor rejected stays *pending* and is retried on the
+        // next tick: consuming it here would drop a real context switch on the floor (short
+        // peeks make the cooldown longer than the peek itself).
+        if (!_toggle.Hidden && (started || !triggered))
+        {
+            _lastWindowKey = windowKey;
+            _lastAppId = appId;
         }
 
         var rows = new List<ShortcutRow>();
@@ -273,9 +283,10 @@ public partial class MainWindow : Window
         if (rows.Count > 0 && !firstRender) RevealList();
     }
 
-    private void StartPeek(OverlaySettings settings, string reason)
+    /// <summary>Start a peek. Returns false when the anti-strobe floor refused it.</summary>
+    private bool StartPeek(OverlaySettings settings, string reason)
     {
-        if ((_clock.Elapsed - _lastPeekStart).TotalSeconds < MinPeekGapSeconds) return;
+        if ((_clock.Elapsed - _lastPeekStart).TotalSeconds < MinPeekGapSeconds) return false;
 
         _lastPeekStart = _clock.Elapsed;
 
@@ -293,6 +304,7 @@ public partial class MainWindow : Window
         _peekCountedRotation = true;
 
         if (Tracing) Log($"peek started for '{_lastAppId}' ({reason}) slot={_rotationSlot} for {settings.PeekSeconds}s");
+        return true;
     }
 
     private void RevealList()
