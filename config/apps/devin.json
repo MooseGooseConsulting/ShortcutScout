@@ -1,0 +1,20 @@
+{
+  "id": "devin",
+  "name": "Devin",
+  "priority": 1000,
+  "process_names": [],
+  "exe_names": [],
+  "title_contains": ["devin.ai", "Devin"],
+  "shortcuts": [
+    { "keys": "Ctrl+K", "action": "Command palette", "discovery": false },
+    { "keys": "Ctrl+Enter", "action": "Send / run task", "discovery": false },
+    { "keys": "Esc", "action": "Stop the current run", "discovery": false },
+    { "keys": "Ctrl+/", "action": "Toggle inline comments on a diff", "discovery": true },
+    { "keys": "Ctrl+Shift+F", "action": "Search across the session", "discovery": true },
+    { "keys": "Ctrl+Shift+E", "action": "Jump to the file explorer panel", "discovery": true },
+    { "keys": "Alt+ArrowUp", "action": "Move the chat composer up a block", "discovery": true },
+    { "keys": "Ctrl+Shift+K", "action": "Open the knowledge / wiki panel", "discovery": true },
+    { "keys": "Ctrl+Shift+M", "action": "Cycle the model / machine picker", "discovery": true },
+    { "keys": "Ctrl+Shift+P", "action": "Open playbooks", "discovery": true }
+  ]
+}

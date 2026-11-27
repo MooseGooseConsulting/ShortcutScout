@@ -1,0 +1,19 @@
+{
+  "id": "claudecode",
+  "name": "Claude Code",
+  "priority": 800,
+  "process_names": ["claude"],
+  "exe_names": [],
+  "title_contains": ["Claude Code"],
+  "shortcuts": [
+    { "keys": "Enter", "action": "Submit prompt", "discovery": false },
+    { "keys": "Esc", "action": "Interrupt the current response", "discovery": false },
+    { "keys": "Ctrl+C", "action": "Cancel / clear input", "discovery": false },
+    { "keys": "Tab", "action": "Accept the autocomplete suggestion", "discovery": true },
+    { "keys": "Shift+Tab", "action": "Cycle permission modes", "discovery": true },
+    { "keys": "Ctrl+R", "action": "Toggle verbose / transcript output", "discovery": true },
+    { "keys": "Ctrl+L", "action": "Clear the terminal view", "discovery": true },
+    { "keys": "Ctrl+D", "action": "Exit the session", "discovery": false },
+    { "keys": "Ctrl+Z", "action": "Suspend and drop back to the shell", "discovery": true }
+  ]
+}

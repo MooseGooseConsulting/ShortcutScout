@@ -1,0 +1,20 @@
+{
+  "id": "chatgpt",
+  "name": "ChatGPT",
+  "priority": 1000,
+  "process_names": [],
+  "exe_names": ["ChatGPT.exe"],
+  "title_contains": ["chatgpt.com", "ChatGPT"],
+  "shortcuts": [
+    { "keys": "Ctrl+Shift+O", "action": "New chat", "discovery": false },
+    { "keys": "Ctrl+Enter", "action": "Send message", "discovery": false },
+    { "keys": "Esc", "action": "Stop generating", "discovery": false },
+    { "keys": "Ctrl+Shift+S", "action": "Toggle the sidebar", "discovery": true },
+    { "keys": "Ctrl+Shift+/", "action": "Show the full shortcut list", "discovery": true },
+    { "keys": "Ctrl+Shift+C", "action": "Copy the last response as Markdown", "discovery": true },
+    { "keys": "Ctrl+Shift+Backspace", "action": "Delete the current chat", "discovery": true },
+    { "keys": "Alt+ArrowUp", "action": "Edit your previous message", "discovery": true },
+    { "keys": "Ctrl+Shift+E", "action": "Open the code editor / canvas", "discovery": true },
+    { "keys": "Ctrl+Shift+M", "action": "Switch model", "discovery": true }
+  ]
+}

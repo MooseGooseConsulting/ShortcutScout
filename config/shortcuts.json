@@ -1,0 +1,31 @@
+{
+  "overlay": {
+    "mode": "peek",
+    "idle_threshold_seconds": 30,
+    "peek_seconds": 6,
+    "active_opacity": 0.9,
+    "idle_opacity": 1.0,
+    "fade_in_ms": 200,
+    "fade_out_ms": 180
+  },
+  "apps": [
+    {
+      "id": "global",
+      "name": "General",
+      "priority": 0,
+      "process_names": [],
+      "exe_names": [],
+      "title_contains": [],
+      "shortcuts": [
+        { "keys": "Alt+Tab", "action": "Switch window", "discovery": false },
+        { "keys": "Win+Tab", "action": "Task view", "discovery": false },
+        { "keys": "Win+D", "action": "Show desktop", "discovery": false },
+        { "keys": "Win+Shift+S", "action": "Screenshot a region", "discovery": true },
+        { "keys": "Win+V", "action": "Clipboard history", "discovery": true },
+        { "keys": "Win+E", "action": "File explorer", "discovery": false },
+        { "keys": "Win+Left", "action": "Snap window to the left", "discovery": true },
+        { "keys": "Win+.", "action": "Emoji / symbol picker", "discovery": true }
+      ]
+    }
+  ]
+}

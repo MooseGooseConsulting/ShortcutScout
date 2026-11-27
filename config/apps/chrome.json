@@ -1,0 +1,20 @@
+{
+  "id": "chrome",
+  "name": "Chrome",
+  "priority": 10,
+  "process_names": ["chrome"],
+  "exe_names": ["chrome.exe"],
+  "title_contains": ["Google Chrome"],
+  "shortcuts": [
+    { "keys": "Ctrl+T", "action": "New tab", "discovery": false },
+    { "keys": "Ctrl+Shift+T", "action": "Reopen the last closed tab", "discovery": false },
+    { "keys": "Ctrl+W", "action": "Close tab", "discovery": false },
+    { "keys": "Ctrl+L", "action": "Focus the address bar", "discovery": false },
+    { "keys": "Ctrl+Shift+P", "action": "Open the command palette", "discovery": true },
+    { "keys": "Ctrl+Shift+A", "action": "Search open tabs", "discovery": true },
+    { "keys": "Ctrl+Shift+J", "action": "Open the DevTools console", "discovery": true },
+    { "keys": "Ctrl+Shift+N", "action": "New incognito window", "discovery": true },
+    { "keys": "Alt+Left", "action": "Back", "discovery": false },
+    { "keys": "Ctrl+Shift+B", "action": "Toggle the bookmarks bar", "discovery": true }
+  ]
+}

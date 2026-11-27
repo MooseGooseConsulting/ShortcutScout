@@ -1,0 +1,20 @@
+# build output
+bin/
+obj/
+TestResults/
+
+# editor state
+.vs/
+.idea/
+*.user
+*.suo
+
+# Freebuff workspace metadata (local to this machine)
+.freebuff/
+
+# never commit credentials
+.env
+.env.*
+*.pem
+*.pfx
+*.key

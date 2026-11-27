@@ -1,0 +1,20 @@
+{
+  "id": "zellij",
+  "name": "Zellij",
+  "priority": 800,
+  "process_names": ["zellij"],
+  "exe_names": [],
+  "title_contains": ["zellij"],
+  "shortcuts": [
+    { "keys": "Ctrl+p", "action": "Enter pane mode", "discovery": false },
+    { "keys": "Ctrl+t", "action": "Enter tab mode", "discovery": false },
+    { "keys": "Ctrl+n", "action": "Enter resize mode", "discovery": false },
+    { "keys": "Ctrl+g", "action": "Toggle locked mode", "discovery": true },
+    { "keys": "Ctrl+p then f", "action": "Toggle a floating pane", "discovery": true },
+    { "keys": "Ctrl+p then z", "action": "Zoom the focused pane", "discovery": true },
+    { "keys": "Ctrl+t then n", "action": "New tab", "discovery": false },
+    { "keys": "Ctrl+n then h", "action": "Grow the pane left", "discovery": true },
+    { "keys": "Ctrl+s", "action": "Enter scroll mode", "discovery": true },
+    { "keys": "Ctrl+o", "action": "Enter session mode", "discovery": true }
+  ]
+}

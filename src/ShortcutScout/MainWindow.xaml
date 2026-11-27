@@ -1,0 +1,51 @@
+<Window x:Class="ShortcutScout.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="ShortcutScout" Width="460" SizeToContent="Height"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ShowInTaskbar="False" ShowActivated="False" Topmost="True"
+        ResizeMode="NoResize" IsHitTestVisible="False" Focusable="False">
+
+  <Window.Resources>
+    <!-- Swapped at runtime when the backdrop changes between dark and light. -->
+    <SolidColorBrush x:Key="KeyBrush" Color="#FF39FF14"/>
+    <SolidColorBrush x:Key="ActionBrush" Color="#FF8CFF7A"/>
+  </Window.Resources>
+
+  <!-- No card, no border, no header: just text floating over whatever is behind it.
+       Legibility comes from a dark halo around the glyphs (WCAG G145 sanctions this),
+       not from a panel behind them. -->
+  <StackPanel x:Name="Root" Margin="16">
+    <StackPanel.Effect>
+      <DropShadowEffect x:Name="Halo" Color="#FF000000" ShadowDepth="0"
+                        BlurRadius="4" Opacity="1"/>
+    </StackPanel.Effect>
+
+    <ItemsControl x:Name="List">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <Grid Margin="0,2">
+            <Grid.ColumnDefinitions>
+              <!-- Fixed, not Auto: with Auto, long keys grew past the column and
+                   collided with the action text. -->
+              <ColumnDefinition Width="176"/>
+              <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Grid.Column="0" Text="{Binding Keys}"
+                       Foreground="{DynamicResource KeyBrush}" FontFamily="Consolas"
+                       FontSize="13" FontWeight="Bold" Margin="0,0,14,0"
+                       TextTrimming="CharacterEllipsis"/>
+            <TextBlock Grid.Column="1" Text="{Binding Action}"
+                       Foreground="{DynamicResource ActionBrush}" FontFamily="Consolas"
+                       FontSize="13" TextWrapping="Wrap"/>
+          </Grid>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+
+    <TextBlock x:Name="EmptyHint" Foreground="{DynamicResource ActionBrush}"
+               FontFamily="Consolas" FontSize="12" TextWrapping="Wrap"
+               Visibility="Collapsed"
+               Text="No shortcuts configured for this window."/>
+  </StackPanel>
+</Window>
