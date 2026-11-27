@@ -40,6 +40,26 @@ public sealed class OverlaySettings
     [JsonPropertyName("fade_in_ms")] public int FadeInMs { get; set; } = 200;
 
     [JsonPropertyName("fade_out_ms")] public int FadeOutMs { get; set; } = 180;
+
+    /// <summary>
+    /// How long to wait before showing the list again unprompted. This is what makes
+    /// discovery work: without it, the panel only ever appears on a window switch or
+    /// when you walk away, which during a normal session can mean never.
+    /// Set to 0 to disable periodic reveals.
+    /// </summary>
+    [JsonPropertyName("re_peek_seconds")] public int RePeekSeconds { get; set; } = 90;
+
+    /// <summary>Text size in device-independent pixels.</summary>
+    [JsonPropertyName("font_size")] public double FontSize { get; set; } = 13;
+
+    /// <summary>Overlay width in device-independent pixels.</summary>
+    [JsonPropertyName("width")] public double Width { get; set; } = 460;
+
+    /// <summary>How many shortcut rows to show at once.</summary>
+    [JsonPropertyName("max_rows")] public int MaxRows { get; set; } = 8;
+
+    /// <summary>Width of the keys column; 0 means "derive it from the font size".</summary>
+    [JsonPropertyName("keys_column_width")] public double KeysColumnWidth { get; set; }
 }
 
 public static class IdlePolicy
@@ -84,6 +104,21 @@ public static class IdlePolicy
     /// <summary>Fade out is quicker than fade in: leaving needs less attention than arriving.</summary>
     public static int FadeDurationMs(OverlaySettings settings, double from, double to) =>
         to > from ? settings.FadeInMs : settings.FadeOutMs;
+
+    /// <summary>
+    /// Whether an unprompted reveal is due. A window switch reveals immediately; this
+    /// catches the case where nothing changes for a long stretch — without it the panel
+    /// can stay hidden for an entire session and looks like it isn't running.
+    /// </summary>
+    public static bool RePeekDue(
+        OverlaySettings settings, bool hidden, double secondsSinceReveal)
+        => !hidden && settings.RePeekSeconds > 0 && secondsSinceReveal >= settings.RePeekSeconds;
+
+    /// <summary>Keys column width: explicit config wins, otherwise it scales with the font.</summary>
+    public static double KeysColumnFor(OverlaySettings settings) =>
+        settings.KeysColumnWidth > 0
+            ? settings.KeysColumnWidth
+            : Math.Round(Math.Max(10, settings.FontSize) * 13.5);
 }
 
 public sealed class ToggleState

@@ -15,12 +15,15 @@ namespace ShortcutScout;
 public partial class MainWindow : Window
 {
     /// <summary>Row rendered by the overlay template.</summary>
-    public sealed record ShortcutRow(string Keys, string Action, bool IsDiscovery);
+    public sealed record ShortcutRow(string Keys, string Action, bool IsDiscovery, double KeyWidth);
 
     private readonly ConfigStore _store;
     private readonly ToggleState _toggle;
     private readonly Rotation _rotation;
     private readonly Stopwatch _clock = Stopwatch.StartNew();
+
+    /// <summary>Rate limit: switching windows quickly shouldn't strobe the panel.</summary>
+    private const double MinPeekGapSeconds = 4;
 
     private double _currentOpacity = -1;
     private string _lastSignature = "";
@@ -33,8 +36,22 @@ public partial class MainWindow : Window
     private bool _sampling;
     private long _lastTickAt;
 
-    /// <summary>When the contextual peek (shown on app switch) ends.</summary>
+    /// <summary>When the current peek ends.</summary>
     private TimeSpan _peekUntil = TimeSpan.MinValue;
+
+    // Long enough ago that the first peek is never rate-limited (MinValue would overflow
+    // when the gap is subtracted).
+    private TimeSpan _lastPeekStart = TimeSpan.FromDays(-1);
+    private TimeSpan _lastRevealAt;
+
+    /// <summary>How many times the panel has become visible; drives rotation.</summary>
+    private int _revealCount;
+
+    private long _lastWindowKey;
+
+    /// <summary>Which slice of the shortcut list is currently on screen.</summary>
+    private long _rotationSlot;
+    private bool _rotatedWhileHidden;
 
     private static readonly bool Tracing =
         Environment.GetEnvironmentVariable("SHORTCUTSCOUT_TRACE") == "1";
@@ -57,6 +74,8 @@ public partial class MainWindow : Window
         Top = OverlayGeometry.DefaultInset;
         Opacity = 0; // start hidden; a peek or idle reveal brings it in
         _currentOpacity = 0;
+        _lastRevealAt = TimeSpan.Zero;
+        ApplyLayout();
         ApplyTheme();
     }
 
@@ -67,6 +86,22 @@ public partial class MainWindow : Window
     public void EnsureHandleReady()
     {
         if (OwnHandle == IntPtr.Zero) Show();
+    }
+
+    /// <summary>Re-read size/row settings, e.g. after the settings window saves.</summary>
+    public void ApplySettings()
+    {
+        ApplyLayout();
+        _lastSignature = ""; // rebuild rows at the new size / count
+        UpdateContent(Settings);
+    }
+
+    private void ApplyLayout()
+    {
+        var s = Settings;
+        Width = Math.Clamp(s.Width, 240, 1600);
+        List.FontSize = Math.Clamp(s.FontSize, 8, 48);
+        EmptyHint.FontSize = Math.Max(8, List.FontSize - 1);
     }
 
     public void Refresh(long tick)
@@ -83,28 +118,41 @@ public partial class MainWindow : Window
             _lastTickAt = now;
         }
 
-        UpdateContent();
-
         var settings = Settings;
+        UpdateContent(settings);
+
         var idle = ForceIdle ? int.MaxValue : Win32.IdleSeconds();
         var peekRemaining = (_peekUntil - _clock.Elapsed).TotalSeconds;
 
         var target = IdlePolicy.OpacityFor(settings, _toggle.Hidden, idle, peekRemaining);
-
         if (_obstructed && !_toggle.Hidden) target = Math.Min(target, 0.14);
+
+        if (target > 0.001)
+        {
+            _rotatedWhileHidden = false;
+        }
+        else if (!_rotatedWhileHidden)
+        {
+            // Advance the rotation the moment the panel goes away, not while it is on
+            // screen: the next appearance is then already built from the new slice, so
+            // rows never swap out from under you mid-peek.
+            _rotatedWhileHidden = true;
+            _revealCount++;
+            _rotationSlot++;
+            _lastSignature = "";
+            if (Tracing) Log($"rotation -> slot {_rotationSlot} (after reveal #{_revealCount})");
+        }
 
         ApplyOpacity(target, settings);
 
         if (_toggle.Hidden) return;
 
-        // Reposition only while invisible. Moving a visible panel is a motion onset,
-        // which is the single most attention-grabbing thing a peripheral widget can do;
-        // by dodging while unseen it simply never appears under the pointer.
-        if (target <= 0.001)
-        {
-            RunAwayFromCursor();
-            BeginBackdropSample();
-        }
+        // Dodge on every tick, visible or not. Waiting until the panel is hidden meant
+        // that during a peek — the only time you can actually see it — it sat under the
+        // cursor and didn't move at all.
+        RunAwayFromCursor();
+
+        if (target <= 0.001) BeginBackdropSample();
     }
 
     /// <summary>
@@ -170,8 +218,9 @@ public partial class MainWindow : Window
         Halo.BlurRadius = theme.HaloBlur;
     }
 
-    private void UpdateContent()
+    private void UpdateContent(OverlaySettings settings)
     {
+        var hwnd = Win32.GetForegroundWindow();
         var fg = ForegroundReader.Read();
         var matched = Matcher.Match(_store.Config.Apps, fg);
         var app = matched ?? _store.Config.Apps.FirstOrDefault(a => a.Id == "global");
@@ -179,31 +228,47 @@ public partial class MainWindow : Window
         var rows = new List<ShortcutRow>();
         if (app != null)
         {
-            var slot = Rotation.SlotFor(_clock.Elapsed);
-            foreach (var s in _rotation.Select(app.Shortcuts, 8, slot))
-                rows.Add(new ShortcutRow(s.Keys, s.Action, s.Discovery));
+            var keyWidth = IdlePolicy.KeysColumnFor(settings);
+            foreach (var s in _rotation.Select(app.Shortcuts, Math.Clamp(settings.MaxRows, 1, 40), _rotationSlot))
+                rows.Add(new ShortcutRow(s.Keys, s.Action, s.Discovery, keyWidth));
         }
 
         var signature = (app?.Id ?? "") + "|" + string.Join(";", rows.Select(r => r.Keys + "=" + r.Action));
-        if (signature == _lastSignature) return;
-
-        var appChanged = (app?.Id ?? "") != _lastAppId;
-        _lastSignature = signature;
-        _lastAppId = app?.Id ?? "";
-
-        List.ItemsSource = rows;
-        EmptyHint.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
-        if (rows.Count > 0 && !appChanged) RevealList();
-
-        // Contextual peek: switching to a configured app is the moment its shortcuts
-        // are worth showing. This is the discovery mechanism — it does not need a
-        // permanently visible panel to work.
-        if (appChanged && rows.Count > 0 && !_toggle.Hidden)
+        if (signature != _lastSignature)
         {
-            _peekUntil = _clock.Elapsed + TimeSpan.FromSeconds(Math.Max(1, Settings.PeekSeconds));
-            if (Tracing) Log($"peek started for '{app?.Id}' for {Settings.PeekSeconds}s");
+            var firstRender = _lastSignature.Length == 0;
+            _lastSignature = signature;
+            _lastAppId = app?.Id ?? "";
+
+            List.ItemsSource = rows;
+            EmptyHint.Visibility = rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
+            // Re-fade the rows when the list changes under a visible panel.
+            if (rows.Count > 0 && !firstRender) RevealList();
         }
+
+        if (rows.Count == 0 || _toggle.Hidden) return;
+
+        // Two reasons to show the list, and neither needs the matched *app* to change.
+        // Keying on the app meant every unconfigured window collapsed into "global", so
+        // moving between them counted as no change and the panel never appeared.
+        var windowKey = hwnd.ToInt64();
+        var windowChanged = windowKey != _lastWindowKey;
+        _lastWindowKey = windowKey;
+
+        if (windowChanged) StartPeek(settings, "window change");
+        else if (IdlePolicy.RePeekDue(settings, _toggle.Hidden,
+                     (_clock.Elapsed - _lastRevealAt).TotalSeconds))
+            StartPeek(settings, "re-peek");
+    }
+
+    private void StartPeek(OverlaySettings settings, string reason)
+    {
+        if ((_clock.Elapsed - _lastPeekStart).TotalSeconds < MinPeekGapSeconds) return;
+
+        _lastPeekStart = _clock.Elapsed;
+        _peekUntil = _clock.Elapsed + TimeSpan.FromSeconds(Math.Max(1, settings.PeekSeconds));
+        if (Tracing) Log($"peek started for '{_lastAppId}' ({reason}) for {settings.PeekSeconds}s");
     }
 
     private void RevealList()

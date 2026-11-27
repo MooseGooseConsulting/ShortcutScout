@@ -4,7 +4,7 @@ Ordered by how much it affects daily use, not by how interesting it is to build.
 
 ---
 
-## 1. The panel almost never appears
+## 1. The panel almost never appears — **fixed**
 
 **The problem.** In `peek` mode the overlay needs one of two triggers, and during real work
 neither fires:
@@ -18,7 +18,7 @@ Measured: one peek at startup, 6 s visible, then hidden for the rest of a 12-hou
 The process was healthy the whole time — correct styles, sampling backdrops, animating opacity
 — but from the outside it looked like it wasn't running at all.
 
-**The fix.** Decouple "something is worth showing" from "the app changed":
+**The fix (implemented).** Decouple "something is worth showing" from "the app changed":
 
 - Peek on **foreground window** change, not matched-app change. Any switch to a different
   window (not just a different *app*) is a context switch where the shortcut list is relevant.
@@ -42,7 +42,7 @@ Cheap fix that survives the borderless look: dim the action text for already-see
 keep the unseen one at full brightness, or prefix it with a `+` glyph. One property on the row
 record, no layout change.
 
-## 3. Rotation happens while nobody is watching
+## 3. Rotation happens while nobody is watching — **fixed**
 
 `Rotation.SlotFor(elapsed)` runs off wall-clock time since launch, so a slot boundary at
 09:03 is consumed by a hidden panel and wasted. Rotation should advance on **reveal**, not on
@@ -57,7 +57,7 @@ edge for ~400 ms, then it appears at that edge (an edge-hover reveal, the way ma
 work). No hotkey to remember, no permanent panel, and the reveal is deliberate rather than
 random. This is the feature I'd build after fixing #1.
 
-## 5. No settings UI, and the tray menu is thin
+## 5. No settings UI, and the tray menu is thin — **done**
 
 Config files and MCP are the intended surface and that's fine, but the tray icon is the only
 discoverable entry point and it currently offers little more than quit/toggle. Worth adding:

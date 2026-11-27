@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace ShortcutScout.Core;
 
@@ -28,6 +29,26 @@ public sealed class ConfigStore
                 catch { /* skip malformed file, keep running */ }
             }
         Config = cfg;
+    }
+
+    /// <summary>
+    /// Persist only the `overlay` block, in place.
+    ///
+    /// Rewriting the whole file would copy every app loaded from config/apps/*.json into
+    /// shortcuts.json, and on the next reload those copies would shadow the real files.
+    /// </summary>
+    public void SaveOverlay()
+    {
+        var path = Path.Combine(ConfigDir, "shortcuts.json");
+        Directory.CreateDirectory(ConfigDir);
+
+        JsonNode root = File.Exists(path)
+            ? JsonNode.Parse(File.ReadAllText(path)) ?? new JsonObject()
+            : new JsonObject();
+
+        root["overlay"] = JsonSerializer.SerializeToNode(Config.Overlay);
+
+        File.WriteAllText(path, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
     }
 
     public void SaveApp(AppConfig app)

@@ -578,6 +578,80 @@ public class Tests
         Assert.AreEqual("chrome", Matcher.Match(apps, new("chrome", "chrome.exe", "News - Google Chrome"))?.Id);
     }
 
+    // ---------- reveal triggers / layout knobs ----------
+
+    [TestMethod]
+    public void RePeek_FiresOnlyAfterTheInterval_AndNeverWhileHidden()
+    {
+        var settings = new OverlaySettings { RePeekSeconds = 90 };
+
+        Assert.IsFalse(IdlePolicy.RePeekDue(settings, hidden: false, secondsSinceReveal: 89));
+        Assert.IsTrue(IdlePolicy.RePeekDue(settings, hidden: false, secondsSinceReveal: 90));
+        Assert.IsFalse(IdlePolicy.RePeekDue(settings, hidden: true, secondsSinceReveal: 600));
+    }
+
+    [TestMethod]
+    public void RePeek_ZeroDisablesPeriodicReveals()
+    {
+        var settings = new OverlaySettings { RePeekSeconds = 0 };
+        Assert.IsFalse(IdlePolicy.RePeekDue(settings, hidden: false, secondsSinceReveal: 10_000));
+    }
+
+    [TestMethod]
+    public void Rotation_AdvancesOncePerReveal_NotOncePerTick()
+    {
+        // Rotation is counted in appearances: wall-clock slots were spent while the
+        // panel was hidden, so the list appeared never to change.
+        Assert.AreEqual(0, Rotation.RevealSlot(0));
+        Assert.AreEqual(1, Rotation.RevealSlot(1));
+        Assert.AreEqual(2, Rotation.RevealSlot(2));
+        Assert.AreEqual(1, Rotation.RevealSlot(5, everyReveals: 3));
+        Assert.AreEqual(0, Rotation.RevealSlot(-3));
+    }
+
+    [TestMethod]
+    public void KeysColumn_ScalesWithFontUnlessExplicitlySet()
+    {
+        var auto = IdlePolicy.KeysColumnFor(new OverlaySettings { FontSize = 13 });
+        var bigger = IdlePolicy.KeysColumnFor(new OverlaySettings { FontSize = 20 });
+        var explicitWidth = IdlePolicy.KeysColumnFor(new OverlaySettings { FontSize = 20, KeysColumnWidth = 300 });
+
+        Assert.IsTrue(bigger > auto, $"column should grow with the font ({auto} -> {bigger})");
+        Assert.AreEqual(300, explicitWidth);
+    }
+
+    [TestMethod]
+    public void SaveOverlay_PersistsSettings_WithoutSwallowingAppFiles()
+    {
+        var dir = Path.Combine(Path.GetTempPath(), "ss-save-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(dir, "apps"));
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "shortcuts.json"),
+                """{"overlay":{"mode":"peek"},"apps":[{"id":"global","name":"General","shortcuts":[]}]}""");
+            File.WriteAllText(Path.Combine(dir, "apps", "devin.json"),
+                """{"id":"devin","name":"Devin","priority":1000,"shortcuts":[{"keys":"Ctrl+K","action":"Palette"}]}""");
+
+            var store = new ConfigStore(dir);
+            store.Config.Overlay.FontSize = 17;
+            store.Config.Overlay.MaxRows = 5;
+            store.SaveOverlay();
+
+            // The app that lives in its own file must not be copied into shortcuts.json,
+            // or it would shadow the real file on the next load.
+            var main = File.ReadAllText(Path.Combine(dir, "shortcuts.json"));
+            StringAssert.Contains(main, "\"font_size\": 17");
+            Assert.IsFalse(main.Contains("Ctrl+K"), "SaveOverlay must not absorb per-app files");
+
+            var reloaded = new ConfigStore(dir);
+            Assert.AreEqual(17, reloaded.Config.Overlay.FontSize);
+            Assert.AreEqual(5, reloaded.Config.Overlay.MaxRows);
+            Assert.AreEqual("devin", reloaded.Config.Apps.Single(a => a.Id == "devin").Id);
+            Assert.AreEqual(1, reloaded.Config.Apps.Single(a => a.Id == "devin").Shortcuts.Count);
+        }
+        finally { Directory.Delete(dir, true); }
+    }
+
     private static string FindRepoRoot()
     {
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
