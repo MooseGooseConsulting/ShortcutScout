@@ -148,31 +148,20 @@ public partial class MainWindow : Window
         var idle = ForceIdle ? int.MaxValue : CurrentIdleSeconds();
         var peekRemaining = _peekUntil <= _clock.Elapsed ? 0 : (_peekUntil - _clock.Elapsed).TotalSeconds;
 
-        var target = IdlePolicy.OpacityFor(settings, _toggle.Hidden, idle, peekRemaining);
-        if (_obstructed && !_toggle.Hidden) target = Math.Min(target, 0.14);
+        // Opacity and rotation are decided together, in Core, so the ordering rules are
+        // covered by tests: `peekRemaining` above is already post-trigger, and the rotation
+        // this returns is used by the rows below.
+        var tickState = OverlayTicker.Decide(
+            settings, _toggle.Hidden, idle, peekRemaining,
+            _currentOpacity, _rotationSlot, _peekCountedRotation, _obstructed);
 
-        // Rotation counts *appearances*. A peek advances the slot when it starts (which is
-        // the only event ambient mode ever gets, since the panel never becomes invisible),
-        // and an appearance not caused by a peek — an idle reveal, or an un-hide whose peek
-        // was refused by the anti-strobe floor — advances it here. The flag keeps one
-        // appearance from being counted twice.
-        //
-        // This runs *before* UpdateContent: building the rows first meant the opening frame
-        // of an idle reveal showed the previous slice and then swapped under the fade.
-        if (target > 0.001 && _currentOpacity <= 0.001)
-        {
-            if (!_peekCountedRotation) _rotationSlot++;
-            _peekCountedRotation = false;
-        }
-        else if (target <= 0.001)
-        {
-            _peekCountedRotation = false;
-        }
+        _rotationSlot = tickState.RotationSlot;
+        _peekCountedRotation = tickState.PeekCountedRotation;
 
         // Rows after the rotation decision, so the first frame of an appearance already shows
         // the slice that decision selected.
         RenderRows(app, settings);
-        ApplyOpacity(target, settings);
+        ApplyOpacity(tickState.Target, settings);
 
         if (_toggle.Hidden) return;
 
@@ -181,7 +170,7 @@ public partial class MainWindow : Window
         // cursor and didn't move at all.
         RunAwayFromCursor();
 
-        if (target <= 0.001) BeginBackdropSample();
+        if (tickState.Target <= 0.001) BeginBackdropSample();
     }
 
     /// <summary>
